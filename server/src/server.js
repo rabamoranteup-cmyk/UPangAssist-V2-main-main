@@ -2,7 +2,6 @@
 require("dotenv").config({ path: path.join(__dirname, "../.env") });
 
 const express = require("express");
-const fs = require("fs");
 const mongoose = require("mongoose");
 const dns = require("node:dns");
 const helmet = require("helmet");
@@ -13,7 +12,12 @@ const rateLimit = require("express-rate-limit");
 const { requireAuth } = require("./middlewares/authMiddleware");
 const taskRoutes = require("./routes/taskRoutes");
 const authRoutes = require("./routes/authRoutes");
+const conversationRoutes = require("./routes/conversationRoutes");
+const Conversation = require("./models/Conversation");
+const ConversationVersion = require("./models/ConversationVersion");
 const { findSemanticReferences } = require("./semanticSearch");
+const { getKnowledgeBase, initializeKnowledgeBase } = require("./services/knowledgeBase");
+const knowledgeRoutes = require("./routes/knowledgeRoutes");
 
 const app = express();
 
@@ -35,7 +39,8 @@ app.use(
     origin: frontendOrigin,
     credentials: true,
     methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type"]
+    allowedHeaders: ["Content-Type"],
+    exposedHeaders: ["X-Conversation-Id"]
   })
 );
 
@@ -50,11 +55,6 @@ app.use(
     legacyHeaders: false
   })
 );
-
-function getKnowledgeBase() {
-  const filePath = path.join(__dirname, "../data/knowledgeBase.json");
-  return JSON.parse(fs.readFileSync(filePath, "utf8"));
-}
 
 const ignoredSearchWords = new Set([
   "about", "after", "also", "and", "are", "can", "could", "does", "for",
@@ -98,15 +98,11 @@ function findRelevantReferences(question) {
       const questionWords = new Set(getSearchWords(reference.question).map(normalizeSearchWord));
       const categoryWords = new Set(getSearchWords(reference.category).map(normalizeSearchWord));
       const answerWords = new Set(getSearchWords(reference.answer).map(normalizeSearchWord));
-      const officeWords = new Set(getSearchWords(reference.office).map(normalizeSearchWord));
-      const sourceWords = new Set(getSearchWords(reference.source).map(normalizeSearchWord));
       const score = words.reduce((total, word) => {
         const wordScore = Math.max(
           questionWords.has(word) ? 8 : 0,
           categoryWords.has(word) ? 6 : 0,
-          answerWords.has(word) ? 2 : 0,
-          officeWords.has(word) ? 2 : 0,
-          sourceWords.has(word) ? 1 : 0
+          answerWords.has(word) ? 2 : 0
         );
         return total + (wordScore > 0 ? wordScore + 4 : 0);
       }, 0);
@@ -172,10 +168,7 @@ function formatReferences(references) {
     `Reference ${index + 1}`,
     `Category: ${reference.category || "Not specified"}`,
     `Question/topic: ${reference.question || "Not specified"}`,
-    `Information: ${reference.answer || "Not specified"}`,
-    `Source: ${reference.source || "Not specified"}`,
-    `Page/section: ${reference.page || "Not specified"}`,
-    `Related office: ${reference.office || "Not specified"}`
+    `Information: ${reference.answer || "Not specified"}`
   ].join("\n")).join("\n\n");
 }
 
@@ -220,6 +213,7 @@ ${referenceContext}`;
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let answer = "";
 
   while (true) {
     const { done, value } = await reader.read();
@@ -233,6 +227,7 @@ ${referenceContext}`;
       try {
         const parsed = JSON.parse(line);
         if (parsed.message?.content) {
+          answer += parsed.message.content;
           res.write(parsed.message.content);
         }
       } catch {
@@ -245,6 +240,7 @@ ${referenceContext}`;
     try {
       const parsed = JSON.parse(buffer);
       if (parsed.message?.content) {
+        answer += parsed.message.content;
         res.write(parsed.message.content);
       }
     } catch {
@@ -252,7 +248,38 @@ ${referenceContext}`;
     }
   }
 
-  res.end();
+  return answer;
+}
+
+async function getOrCreateConversation(req, question) {
+  const conversationId = req.body?.conversationId;
+  if (conversationId !== undefined && !mongoose.isValidObjectId(conversationId)) {
+    const error = new Error("Invalid conversation ID");
+    error.status = 400;
+    throw error;
+  }
+  if (conversationId) {
+    const conversation = await Conversation.findOne({ _id: conversationId, owner: req.user._id });
+    if (!conversation) {
+      const error = new Error("Conversation not found");
+      error.status = 404;
+      throw error;
+    }
+    return conversation;
+  }
+  return Conversation.create({ owner: req.user._id, title: question.slice(0, 120) });
+}
+
+async function saveChatTurn(conversation, question, answer, references = []) {
+  conversation.messages.push(
+    { role: "user", content: question },
+    {
+      role: "assistant",
+      content: answer,
+      references: references.map(({ category, question: topic }) => ({ category, question: topic }))
+    }
+  );
+  await conversation.save();
 }
 
 async function generateAnswerWithOllama(question, referenceContext) {
@@ -261,7 +288,7 @@ async function generateAnswerWithOllama(question, referenceContext) {
 
   const systemInstruction = `You are UPangAssist, a helpful and student-friendly university information assistant for PHINMA University of Pangasinan (UPang).
 Answer strictly using the verified UPang references supplied below. Never invent or hallucinate policies, requirements, fees, dates, or contact details.
-Keep your answers brief and straight to the point (under 3-4 sentences). Include source where available.
+Keep your answers brief and straight to the point (under 3-4 sentences).
 
 Verified UPang references:
 ${referenceContext}`;
@@ -296,28 +323,39 @@ app.post("/api/chat", requireAuth, async (req, res) => {
   const question = typeof req.body?.question === "string" ? req.body.question.trim() : "";
   const wantStream = req.body?.stream === true || req.query?.stream === "true";
 
-  if (!question) {
-    return res.status(400).json({ error: "question is required" });
+  if (!question || question.length > 12000) {
+    return res.status(400).json({ error: "question is required and must be at most 12000 characters" });
+  }
+
+  let conversation;
+  try {
+    conversation = await getOrCreateConversation(req, question);
+  } catch (error) {
+    return res.status(error.status || 500).json({ error: error.status ? error.message : "Unable to save conversation" });
   }
 
   const unverifiedBuilding = findUnverifiedBuildingName(question);
   if (unverifiedBuilding) {
     const message = `I do not have a verified UPang reference for the ${unverifiedBuilding} Building location. Please contact Campus Administration or the relevant college office for the current location.`;
+    await saveChatTurn(conversation, question, message);
     if (wantStream) {
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.setHeader("X-Conversation-Id", conversation._id.toString());
       return res.end(message);
     }
-    return res.json({ text: message, provider: "verified_reference_check" });
+    return res.json({ text: message, provider: "verified_reference_check", conversationId: conversation._id });
   }
 
   const specificBuilding = findSpecificBuildingReference(question);
   if (specificBuilding) {
-    const specificBuildingText = `${specificBuilding.answer}\n\n*Source: ${specificBuilding.source || "UPang Campus Directory"} (${specificBuilding.page || "Campus Map"})*`;
+  const specificBuildingText = specificBuilding.answer;
+    await saveChatTurn(conversation, question, specificBuildingText, [specificBuilding]);
     if (wantStream) {
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.setHeader("X-Conversation-Id", conversation._id.toString());
       return res.end(specificBuildingText);
     }
-    return res.json({ text: specificBuildingText, provider: "instant_knowledge_base" });
+    return res.json({ text: specificBuildingText, provider: "instant_knowledge_base", conversationId: conversation._id });
   }
 
   // Semantic search handles paraphrases; keyword search remains a safe fallback.
@@ -334,7 +372,11 @@ app.post("/api/chat", requireAuth, async (req, res) => {
   try {
     // 2. Streamed generation with local LLM for real-time word-by-word display
     if (provider === "ollama" && wantStream) {
-      return await streamAnswerWithOllama(question, referenceContext, res);
+      res.setHeader("X-Conversation-Id", conversation._id.toString());
+      const answer = await streamAnswerWithOllama(question, referenceContext, res);
+      await saveChatTurn(conversation, question, answer, references);
+      res.end();
+      return;
     }
 
     let text = "";
@@ -342,7 +384,7 @@ app.post("/api/chat", requireAuth, async (req, res) => {
       text = await generateAnswerWithOllama(question, referenceContext);
     } else {
       text = references.length > 0
-        ? `${references[0].answer}\n\n*Source: ${references[0].source || "UPang Knowledge Base"} (${references[0].office || "Official Office"})*`
+        ? references[0].answer
         : "I do not have enough verified information to answer this question. Please contact the appropriate UPang office for assistance.";
     }
 
@@ -350,29 +392,114 @@ app.post("/api/chat", requireAuth, async (req, res) => {
       return res.status(502).json({ error: "Chatbot returned an empty answer" });
     }
 
-    return res.json({ text, provider });
+    await saveChatTurn(conversation, question, text, references);
+    return res.json({ text, provider, conversationId: conversation._id });
   } catch (error) {
     console.error(`Chat error (${provider}):`, error.message);
 
     // If local LLM is starting up or temporarily unavailable, use direct reference fallback
     if (references.length > 0) {
       const top = references[0];
-      const fallbackText = `${top.answer}\n\n*Office: ${top.office || "Official Office"} | Source: ${top.source || "Official UPang Guidelines"}*`;
+      const fallbackText = top.answer;
+      await saveChatTurn(conversation, question, fallbackText, references);
       if (wantStream) {
         res.setHeader("Content-Type", "text/plain; charset=utf-8");
+        res.setHeader("X-Conversation-Id", conversation._id.toString());
         return res.end(fallbackText);
       }
-      return res.json({ text: fallbackText, fallback: true });
+      return res.json({ text: fallbackText, fallback: true, conversationId: conversation._id });
     }
 
     // Keep the chat usable when the optional AI provider is offline and the
     // question has no matching knowledge-base entry.
     const unavailableText = "I couldn't find a verified UPang answer for that question right now. I can help with enrollment, Registrar services, tuition payments, scholarships, campus locations, and student wellness services. For other concerns, please contact the appropriate official UPang office.";
+    await saveChatTurn(conversation, question, unavailableText);
     if (wantStream) {
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.setHeader("X-Conversation-Id", conversation._id.toString());
       return res.end(unavailableText);
     }
-    return res.json({ text: unavailableText, fallback: true });
+    return res.json({ text: unavailableText, fallback: true, conversationId: conversation._id });
+  }
+});
+
+app.post("/api/conversations/:id/edit", requireAuth, async (req, res) => {
+  const { id } = req.params;
+  const messageId = req.body?.messageId;
+  const editedContent = typeof req.body?.content === "string" ? req.body.content.trim() : "";
+  if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(messageId)) {
+    return res.status(400).json({ error: "Invalid conversation or message ID" });
+  }
+  if (!editedContent || editedContent.length > 12000) {
+    return res.status(400).json({ error: "Edited message must be 1 to 12000 characters" });
+  }
+
+  try {
+    const conversation = await Conversation.findOne({ _id: id, owner: req.user._id });
+    if (!conversation) return res.status(404).json({ error: "Conversation not found" });
+    const messageIndex = conversation.messages.findIndex((message) => message._id.toString() === messageId);
+    if (messageIndex < 0 || conversation.messages[messageIndex].role !== "user") {
+      return res.status(404).json({ error: "User message not found in this conversation" });
+    }
+    const latestUserMessageIndex = conversation.messages.findLastIndex((message) => message.role === "user");
+    if (messageIndex !== latestUserMessageIndex) {
+      return res.status(409).json({ error: "Only the latest user message can be edited" });
+    }
+
+    let references = findRelevantReferences(editedContent);
+    try {
+      const semanticReferences = await findSemanticReferences(editedContent, getKnowledgeBase());
+      if (semanticReferences.length) references = semanticReferences;
+    } catch (error) {
+      console.warn("Semantic search unavailable during message edit:", error.message);
+    }
+
+    const referenceContext = formatReferences(references);
+    const provider = (process.env.LLM_PROVIDER || "ollama").toLowerCase();
+    const verifiedFallback = references.length
+      ? references[0].answer
+      : "I couldn't find a verified UPang answer for that question. Please contact the appropriate official UPang office for assistance.";
+    let answer = verifiedFallback;
+    if (provider === "ollama") {
+      try {
+        answer = await generateAnswerWithOllama(editedContent, referenceContext) || verifiedFallback;
+      } catch (error) {
+        console.warn("AI regeneration unavailable; using verified reference fallback:", error.message);
+      }
+    }
+
+    const priorMessages = conversation.messages.map((message) => message.toObject({ depopulate: true }));
+    const previousVersionCount = await ConversationVersion.countDocuments({ conversation: conversation._id, owner: req.user._id });
+    const savedVersion = await ConversationVersion.create({
+      conversation: conversation._id,
+      owner: req.user._id,
+      versionNumber: previousVersionCount + 1,
+      editedMessageId: conversation.messages[messageIndex]._id,
+      messages: priorMessages
+    });
+
+    try {
+      conversation.messages.splice(messageIndex + 1);
+      conversation.messages[messageIndex].content = editedContent;
+      conversation.messages.push({ role: "assistant", content: answer, references });
+      if (messageIndex === 0) conversation.title = editedContent.slice(0, 120);
+      await conversation.save();
+    } catch (error) {
+      await ConversationVersion.deleteOne({ _id: savedVersion._id, owner: req.user._id });
+      throw error;
+    }
+
+    return res.json({
+      id: conversation._id,
+      title: conversation.title,
+      messages: conversation.messages,
+      versionIndex: 0,
+      versionCount: previousVersionCount + 2,
+      createdVersion: previousVersionCount + 1
+    });
+  } catch (error) {
+    console.error("Conversation edit failed:", error.message);
+    return res.status(500).json({ error: "Unable to edit conversation and regenerate its answer" });
   }
 });
 
@@ -384,6 +511,8 @@ if (!process.env.MONGODB_URI) {
 
 app.use("/api/auth", authRoutes);
 app.use("/api/tasks", taskRoutes);
+app.use("/api/conversations", conversationRoutes);
+app.use("/api/admin/knowledge", knowledgeRoutes);
 
 async function startServer() {
   try {
@@ -400,6 +529,8 @@ async function startServer() {
     // can be handled while writes are still being buffered for a connection.
     await mongoose.connect(process.env.MONGODB_URI);
     console.log(`MongoDB connected to ${mongoose.connection.name}`);
+    await initializeKnowledgeBase();
+    console.log(`Chatbot knowledge loaded (${getKnowledgeBase().length} entries)`);
     app.listen(process.env.PORT || 3000, () => {
       console.log(`Server running on http://localhost:${process.env.PORT || 3000}`);
     });

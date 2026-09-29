@@ -4,10 +4,7 @@ function referenceToText(reference) {
   return [
     reference.category,
     reference.question,
-    reference.answer,
-    reference.source,
-    reference.page,
-    reference.office
+    reference.answer
   ].filter(Boolean).join("\n");
 }
 

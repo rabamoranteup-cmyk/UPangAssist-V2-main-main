@@ -4,6 +4,7 @@ import campusPhoto from './assets/UpangCampus.jpg'
 import './Landing.css'
 import './App.css'
 import { apiBaseUrl, apiRequest } from './utils/apiBaseUrl'
+import AdminKnowledge from './AdminKnowledge'
 
 const quickPrompts = [
   "Where is the Registrar's Office?",
@@ -11,58 +12,6 @@ const quickPrompts = [
   'How can I apply for a scholarship?',
   'Where are the campus buildings located?',
 ]
-
-// Mock responses tailored to PHINMA University of Pangasinan
-function generateCampusResponse(query) {
-  const lower = query.toLowerCase()
-
-  if (lower.includes('registrar') || lower.includes('tor') || lower.includes('transcript') || lower.includes('record')) {
-    return {
-      text: `The **Office of the University Registrar** is located on the **Ground Floor of the Main Building** (Administration Wing).\n\nâ€¢ **Window Hours:** Monday to Friday, 8:00 AM â€“ 5:00 PM | Saturday, 8:00 AM â€“ 12:00 PM\nâ€¢ **Services:** Transcript of Records (TOR), Honorable Dismissal, Certificate of Good Moral, True Copy of Grades (TCG), and CAV authentication.\nâ€¢ **Document Processing:** You can submit document requests online via the Student Portal or visit Window 1 & 2 for document claiming.\n\n*Tip: Bring your Valid Student ID and official receipt when claiming documents.*`,
-      followUps: ['How to request Honorable Dismissal?', 'What are the fees for Transcript of Records?'],
-    }
-  }
-
-  if (lower.includes('tuition') || lower.includes('pay') || lower.includes('cashier') || lower.includes('fee') || lower.includes('installment')) {
-    return {
-      text: `PHINMA UPang offers flexible installment payment plans:\n\n**1. On-Campus Payment:**\nâ€¢ **Location:** University Cashier, Ground Floor, Admin Wing\nâ€¢ **Hours:** Monâ€“Fri 8:00 AM â€“ 4:30 PM\n\n**2. Online / Bank Channels:**\nâ€¢ **GCash / Maya:** Search for "PHINMA University of Pangasinan" in Bills Payment\nâ€¢ **Landbank / BDO:** Over-the-counter or online bank deposit using your Student Number as Reference\nâ€¢ **Student Portal:** Settle balances directly through the integrated payment gateway\n\n*Note: Allow 24 to 48 hours for online payments to reflect in your official ledger.*`,
-      followUps: ['Where can I see my remaining balance?', 'Promissory note procedures'],
-    }
-  }
-
-  if (lower.includes('scholarship') || lower.includes('hawak kamay') || lower.includes('discount') || lower.includes('grant')) {
-    return {
-      text: `PHINMA UPang is committed to accessible education through the **Hawak Kamay (HK) Scholarship**:\n\nâ€¢ **Coverage:** Up to 50% â€“ 75% tuition and miscellaneous discount.\nâ€¢ **Eligibility:** Open to high school graduates and continuing students with a heart to learn. No maintaining honors grade required â€” just pass your enrolled subjects!\nâ€¢ **Requirements:**\n  1. Accomplished HK Application Form\n  2. Certificate of Indigency or Proof of Income (ITR)\n  3. Latest Report Card or Transcript of Grades\n  4. 2x2 ID Photo\nâ€¢ **Where to apply:** Student Development & Scholarships Office, 2nd Floor Student Pavilion.`,
-      followUps: ['Are there scholarships for Dean\'s Listers?', 'CHED Tulong Dunong requirements'],
-    }
-  }
-
-  if (lower.includes('building') || lower.includes('cea') || lower.includes('cbt') || lower.includes('library') || lower.includes('map') || lower.includes('where')) {
-    return {
-      text: `Here is a quick directory of key campus landmarks at PHINMA UPang Dagupan:\n\nâ€¢ ðŸ›ï¸ **Main Building:** Administration, Registrar, Cashier, and College of Education.\nâ€¢ ðŸ—ï¸ **CEA Building:** College of Engineering & Architecture, drafting laboratories, CAD labs, and civil testing rooms.\nâ€¢ ðŸ’¼ **CBT Building:** College of Business and Technology, IT/Computer laboratories, and business mock offices.\nâ€¢ ðŸ“– **University Library:** 3rd & 4th Floors of the Student Center Building with quiet study carrels, online catalog access, and discussion rooms.\nâ€¢ ðŸ€ **University Gymnasium:** Located near the athletic field for physical education classes and university assemblies.`,
-      followUps: ['Where is the IT laboratory located?', 'Where is the Student Pavilion?'],
-    }
-  }
-
-  if (lower.includes('enroll') || lower.includes('subject') || lower.includes('advising') || lower.includes('schedule')) {
-    return {
-      text: `Step-by-Step Enrollment Guide for PHINMA UPang Wildcats:\n\n1. **Step 1 â€” Advising:** Log in to the UPang Student Portal or visit your College Dean's Office for curriculum evaluation.\n2. **Step 2 â€” Sectioning:** Select your course load and class schedules.\n3. **Step 3 â€” Assessment:** Review your breakdown of tuition and payment schedule.\n4. **Step 4 â€” Downpayment:** Settle the minimum downpayment through online channels or the Cashier.\n5. **Step 5 â€” Official Registration:** Your Certificate of Matriculation (COM) will be generated and marked ENROLLED.`,
-      followUps: ['Can I add or drop subjects after enrollment?', 'How to shift programs?'],
-    }
-  }
-
-  if (lower.includes('clinic') || lower.includes('guidance') || lower.includes('counseling') || lower.includes('health') || lower.includes('doctor')) {
-    return {
-      text: `Student Health & Wellness Facilities:\n\nâ€¢ ðŸ©º **University Clinic:** Ground Floor, Student Pavilion.\n  - Open Monday to Friday, 8:00 AM â€“ 5:00 PM.\n  - Offers free physician consultations, routine checkups, emergency first aid, and basic over-the-counter medicine.\n\nâ€¢ ðŸ’¬ **Guidance & Counseling Center:** 2nd Floor, Main Wing.\n  - Provides academic counseling, career assessments, and psychological wellness counseling.\n  - Consultations are strictly confidential. Walk-ins and appointments are welcome.`,
-      followUps: ['Medical certificate requirement for absences', 'How to schedule a guidance appointment'],
-    }
-  }
-
-  return {
-    text: `Hello, Wildcat! I am here to assist you with anything regarding **PHINMA University of Pangasinan**.\n\nYou can ask me about:\nâ€¢ ðŸ›ï¸ Registrar window hours, TOR requests, and certifications\nâ€¢ ðŸ’³ Tuition payments, installment plans, and cashier lines\nâ€¢ ðŸŽ“ Hawak Kamay scholarships, grants, and discounts\nâ€¢ ðŸ—ºï¸ Campus buildings, IT labs, and library facilities\nâ€¢ ðŸ“‹ Enrollment procedures and curriculum advising\n\nHow can I best help you today?`,
-    followUps: ['Where is the Registrar\'s Office?', 'How to apply for Hawak Kamay scholarship?'],
-  }
-}
 
 let nextUniqueId = 1000
 function getNextId(prefix = 'item') {
@@ -77,11 +26,18 @@ export default function App() {
   const [isTyping, setIsTyping] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [activeHistoryId, setActiveHistoryId] = useState(null)
-  const [historyList, setHistoryList] = useState([
-    { id: 'h1', title: "Where is the Registrar's Office?" },
-    { id: 'h2', title: 'Hawak Kamay scholarship requirements' },
-    { id: 'h3', title: 'Tuition payment channels' },
-  ])
+  const [historyList, setHistoryList] = useState([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [editingHistoryId, setEditingHistoryId] = useState(null)
+  const [historyTitleDraft, setHistoryTitleDraft] = useState('')
+  const [conversationVersions, setConversationVersions] = useState([])
+  const [showVersionsModal, setShowVersionsModal] = useState(false)
+  const [versionModalMessageId, setVersionModalMessageId] = useState(null)
+  const [versionModalPosition, setVersionModalPosition] = useState(0)
+  const [versionModalTurn, setVersionModalTurn] = useState(null)
+  const [versionModalVersions, setVersionModalVersions] = useState([])
+  const [editingMessageId, setEditingMessageId] = useState(null)
+  const [editedMessageDraft, setEditedMessageDraft] = useState('')
 
   const [currentUser, setCurrentUser] = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
@@ -108,7 +64,9 @@ export default function App() {
 
         if (!cancelled) {
           setCurrentUser(data.user || null)
-          setView(data.user ? 'assistant' : 'home')
+          const wantsAdmin = window.location.pathname === '/admin'
+          if (wantsAdmin && data.user?.role !== 'admin') window.history.replaceState({}, '', '/')
+          setView(data.user ? (wantsAdmin && data.user.role === 'admin' ? 'admin' : 'assistant') : 'home')
         }
       } catch {
         if (!cancelled) {
@@ -130,6 +88,45 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    const syncAdminRoute = () => {
+      if (window.location.pathname === '/admin') {
+        if (currentUser?.role === 'admin') setView('admin')
+        else {
+          window.history.replaceState({}, '', '/')
+          setView(currentUser ? 'assistant' : 'home')
+        }
+      } else if (view === 'admin') setView(currentUser ? 'assistant' : 'home')
+    }
+    window.addEventListener('popstate', syncAdminRoute)
+    return () => window.removeEventListener('popstate', syncAdminRoute)
+  }, [currentUser, view])
+
+  const openAdminPage = () => {
+    if (currentUser?.role !== 'admin') return
+    window.history.pushState({}, '', '/admin')
+    setView('admin')
+    setSidebarOpen(false)
+  }
+  const closeAdminPage = () => {
+    window.history.pushState({}, '', '/')
+    setView('assistant')
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    if (!currentUser) {
+      setHistoryList([])
+      return undefined
+    }
+    setHistoryLoading(true)
+    apiRequest('/conversations')
+      .then((items) => { if (!cancelled) setHistoryList(items) })
+      .catch((error) => { if (!cancelled) console.error('Unable to load conversation history:', error) })
+      .finally(() => { if (!cancelled) setHistoryLoading(false) })
+    return () => { cancelled = true }
+  }, [currentUser])
+
+  useEffect(() => {
     if (!showLogoutConfirm) return undefined
     const handleKeyDown = (event) => {
       if (event.key === 'Escape' && !loggingOut) setShowLogoutConfirm(false)
@@ -147,6 +144,8 @@ export default function App() {
     } finally {
       setCurrentUser(null)
       setMessages([])
+      setHistoryList([])
+      setActiveHistoryId(null)
       setView('login')
       setShowLogoutConfirm(false)
       setLoggingOut(false)
@@ -168,16 +167,6 @@ export default function App() {
     setInput('')
     setIsTyping(true)
 
-    // Save to history if this is a fresh conversation
-    if (messages.length === 0) {
-      const newHistoryItem = {
-        id: getNextId('hist'),
-        title: trimmed.length > 32 ? trimmed.substring(0, 32) + '...' : trimmed,
-      }
-      setHistoryList((prev) => [newHistoryItem, ...prev])
-      setActiveHistoryId(newHistoryItem.id)
-    }
-
     const assistantMsgId = getNextId('asst_msg')
     const assistantTimestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
@@ -191,8 +180,12 @@ export default function App() {
         body: JSON.stringify({
           question: trimmed,
           stream: true,
+          ...(activeHistoryId ? { conversationId: activeHistoryId } : {}),
         }),
       })
+
+      const persistedConversationId = response.headers.get('X-Conversation-Id')
+      if (persistedConversationId) setActiveHistoryId(persistedConversationId)
 
       if (!response.ok) {
         throw new Error('Chat request failed')
@@ -203,6 +196,7 @@ export default function App() {
       if (contentType.includes('application/json')) {
         const data = await response.json()
         if (!response.ok) throw new Error(data.error || 'Chat request failed')
+        if (data.conversationId) setActiveHistoryId(data.conversationId)
         setMessages((prev) => [
           ...prev,
           {
@@ -246,16 +240,30 @@ export default function App() {
           )
         }
       }
+      if (persistedConversationId) {
+        const [items, conversation] = await Promise.all([
+          apiRequest('/conversations'),
+          apiRequest(`/conversations/${persistedConversationId}`),
+        ])
+        setHistoryList(items)
+        setConversationVersions(conversation.versions || [])
+        setMessages(conversation.messages.map((message) => ({
+          id: message._id,
+          sender: message.role,
+          text: message.content,
+          followUps: [],
+          timestamp: new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        })))
+      }
     } catch (err) {
       console.error('Chat error:', err)
-      const fallbackResponse = generateCampusResponse(trimmed)
       setMessages((prev) => {
         const exists = prev.some((m) => m.id === assistantMsgId)
         const fallbackMsg = {
           id: assistantMsgId,
           sender: 'assistant',
-          text: fallbackResponse.text,
-          followUps: fallbackResponse.followUps,
+          text: `I couldn't send that message. ${err.message || 'Please try again.'}`,
+          followUps: [],
           timestamp: assistantTimestamp,
         }
         return exists
@@ -275,6 +283,10 @@ export default function App() {
     setMessages([])
     setInput('')
     setActiveHistoryId(null)
+    setConversationVersions([])
+    setShowVersionsModal(false)
+    setVersionModalTurn(null)
+    setEditingMessageId(null)
     if (window.innerWidth <= 900) {
       setSidebarOpen(false)
     }
@@ -282,34 +294,142 @@ export default function App() {
 
   const handleSelectHistory = (item) => {
     setActiveHistoryId(item.id)
-    const responseData = generateCampusResponse(item.title)
-    setMessages([
-      {
-        id: getNextId('hist_usr'),
-        sender: 'user',
-        text: item.title,
-        timestamp: 'Just now',
-      },
-      {
-        id: getNextId('hist_asst'),
-        sender: 'assistant',
-        text: responseData.text,
-        followUps: responseData.followUps,
-        timestamp: 'Just now',
-      },
-    ])
+    setEditingMessageId(null)
+    setShowVersionsModal(false)
+    setMessages([])
+    apiRequest(`/conversations/${item.id}`)
+      .then((conversation) => {
+        setConversationVersions(conversation.versions || [])
+        setMessages(conversation.messages.map((message) => ({
+          id: message._id,
+          sender: message.role,
+          text: message.content,
+          followUps: [],
+          timestamp: new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        })))
+      })
+      .catch((error) => console.error('Unable to load conversation:', error))
     if (window.innerWidth <= 900) {
       setSidebarOpen(false)
     }
   }
 
-  const handleDeleteHistory = (e, id) => {
-    e.stopPropagation()
-    setHistoryList((prev) => prev.filter((item) => item.id !== id))
-    if (activeHistoryId === id) {
-      handleNewConversation()
+  const getVersionedTurn = (savedMessages, messageId) => {
+    const messageIndex = savedMessages.findIndex((message) => String(message._id) === messageId)
+    if (messageIndex < 0) return null
+    const userMessage = savedMessages[messageIndex]
+    const assistantMessage = savedMessages[messageIndex + 1]
+    if (userMessage.role !== 'user') return null
+    return {
+      user: userMessage.content,
+      assistant: assistantMessage?.role === 'assistant' ? assistantMessage.content : '',
     }
   }
+
+  const handleOpenMessageVersions = async (messageId) => {
+    if (!activeHistoryId) return
+    try {
+      const current = await apiRequest(`/conversations/${activeHistoryId}?messageId=${messageId}`)
+      setVersionModalVersions(current.versions || [])
+      const versions = current.versions || []
+      if (!versions.length) return
+      const oldest = await apiRequest(`/conversations/${activeHistoryId}?messageId=${messageId}&version=1`)
+      setVersionModalMessageId(messageId)
+      setVersionModalPosition(0)
+      setVersionModalTurn(getVersionedTurn(oldest.messages, messageId))
+      setShowVersionsModal(true)
+    } catch (error) {
+      console.error('Unable to load message versions:', error)
+    }
+  }
+
+  const handleChangeModalVersion = async (position) => {
+    if (!activeHistoryId || !versionModalMessageId) return
+    const versionPosition = Math.max(0, Math.min(position, versionModalVersions.length))
+    const versionCount = versionModalVersions.length
+    const apiVersion = versionPosition === versionCount ? 0 : versionPosition + 1
+    try {
+      const version = await apiRequest(`/conversations/${activeHistoryId}?messageId=${versionModalMessageId}&version=${apiVersion}`)
+      setVersionModalPosition(versionPosition)
+      setVersionModalTurn(getVersionedTurn(version.messages, versionModalMessageId))
+    } catch (error) {
+      console.error('Unable to open message version:', error)
+    }
+  }
+
+  const handleEditConversationMessage = async (message) => {
+    const content = editedMessageDraft.trim()
+    setEditingMessageId(null)
+    if (!content || content === message.text || !activeHistoryId) return
+    setMessages((items) => {
+      const editedIndex = items.findIndex((item) => item.id === message.id)
+      if (editedIndex < 0) return items
+      return [
+        ...items.slice(0, editedIndex),
+        { ...items[editedIndex], text: content },
+      ]
+    })
+    setIsTyping(true)
+    try {
+      const conversation = await apiRequest(`/conversations/${activeHistoryId}/edit`, {
+        method: 'POST',
+        body: JSON.stringify({ messageId: message.id, content }),
+      })
+      const withVersionMetadata = await apiRequest(`/conversations/${activeHistoryId}`)
+      setMessages(conversation.messages.map((savedMessage) => ({
+        id: savedMessage._id,
+        sender: savedMessage.role,
+        text: savedMessage.content,
+        followUps: [],
+        timestamp: new Date(savedMessage.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      })))
+      setConversationVersions(withVersionMetadata.versions || [])
+      setHistoryList((items) => items.map((item) => item.id === activeHistoryId
+        ? { ...item, title: conversation.title }
+        : item))
+    } catch (error) {
+      console.error('Unable to edit conversation message:', error)
+      setMessages((items) => [...items, {
+        id: getNextId('edit_error'),
+        sender: 'assistant',
+        text: `I couldn't edit that message. ${error.message || 'Please try again.'}`,
+        followUps: [],
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      }])
+    } finally {
+      setIsTyping(false)
+    }
+  }
+
+  const handleDeleteHistory = async (e, id) => {
+    e.stopPropagation()
+    try {
+      await apiRequest(`/conversations/${id}`, { method: 'DELETE' })
+      setHistoryList((prev) => prev.filter((item) => item.id !== id))
+      if (activeHistoryId === id) handleNewConversation()
+    } catch (error) {
+      console.error('Unable to delete conversation:', error)
+    }
+  }
+
+  const handleRenameHistory = async (id) => {
+    const title = historyTitleDraft.trim()
+    const previousTitle = historyList.find((item) => item.id === id)?.title
+    setEditingHistoryId(null)
+    if (!title || title === previousTitle) return
+    try {
+      const updated = await apiRequest(`/conversations/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ title }),
+      })
+      setHistoryList((items) => items.map((item) => item.id === id ? { ...item, title: updated.title } : item))
+    } catch (error) {
+      console.error('Unable to rename conversation:', error)
+      setHistoryTitleDraft(previousTitle || '')
+    }
+  }
+  const latestUserMessageId = [...messages].reverse().find((message) => message.sender === 'user')?.id
+
   if (authLoading) {
     return (
       <main className="login-page">
@@ -332,6 +452,9 @@ export default function App() {
   }
   if (view === 'home') {
     return <LandingPage onLogin={() => setView('login')} onSignUp={() => setView('signup')} />
+  }
+  if (view === 'admin' && currentUser?.role === 'admin') {
+    return <AdminKnowledge onBack={closeAdminPage} />
   }
   return (
     <div className="app-shell">
@@ -395,13 +518,45 @@ export default function App() {
         {/* History Section */}
         <div className="history-label">History</div>
         <ul className="history-list">
+          {historyLoading && <li className="history-empty">Loading conversations...</li>}
+          {!historyLoading && historyList.length === 0 && <li className="history-empty">No saved conversations yet</li>}
           {historyList.map((item) => (
             <li
               key={item.id}
               className={`history-item ${activeHistoryId === item.id ? 'active' : ''}`}
               onClick={() => handleSelectHistory(item)}
             >
-              <span className="history-title">{item.title}</span>
+              {editingHistoryId === item.id ? (
+                <input
+                  className="history-title-input"
+                  aria-label="Conversation name"
+                  autoFocus
+                  maxLength={120}
+                  value={historyTitleDraft}
+                  onChange={(event) => setHistoryTitleDraft(event.target.value)}
+                  onClick={(event) => event.stopPropagation()}
+                  onBlur={() => handleRenameHistory(item.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur()
+                    if (event.key === 'Escape') {
+                      setHistoryTitleDraft(item.title)
+                      setEditingHistoryId(null)
+                    }
+                  }}
+                />
+              ) : (
+                <span
+                  className="history-title"
+                  title="Double-click to rename"
+                  onDoubleClick={(event) => {
+                    event.stopPropagation()
+                    setHistoryTitleDraft(item.title)
+                    setEditingHistoryId(item.id)
+                  }}
+                >
+                  {item.title}
+                </span>
+              )}
               <button
                 type="button"
                 className="history-delete-btn"
@@ -420,6 +575,12 @@ export default function App() {
           <span>Help</span>
           <span>Settings</span>
         </div>
+
+        {currentUser?.role === 'admin' && (
+          <button className="new-conversation" type="button" onClick={openAdminPage}>
+            <span aria-hidden="true">⚙</span><span>Manage Knowledge</span>
+          </button>
+        )}
 
         {currentUser ? (
           <section className="sidebar-profile" aria-label="Signed-in profile">
@@ -586,7 +747,21 @@ export default function App() {
                     </div>
 
                     <div className="message-bubble">
-                      {msg.sender === 'assistant' ? (
+                      {editingMessageId === msg.id ? (
+                        <form className="edit-message-form" onSubmit={(event) => { event.preventDefault(); handleEditConversationMessage(msg) }}>
+                          <textarea
+                            autoFocus
+                            value={editedMessageDraft}
+                            maxLength={12000}
+                            onChange={(event) => setEditedMessageDraft(event.target.value)}
+                            aria-label="Edit your message"
+                          />
+                          <div className="edit-message-actions">
+                            <button type="button" onClick={() => setEditingMessageId(null)}>Cancel</button>
+                            <button type="submit" disabled={!editedMessageDraft.trim() || isTyping}>Save and regenerate</button>
+                          </div>
+                        </form>
+                      ) : msg.sender === 'assistant' ? (
                         <div
                           className="formatted-content"
                           dangerouslySetInnerHTML={{
@@ -595,6 +770,32 @@ export default function App() {
                         />
                       ) : (
                         <p>{msg.text}</p>
+                      )}
+                    </div>
+
+                    <div className="message-action-row">
+                      {msg.sender === 'user' && msg.id === latestUserMessageId && activeHistoryId && /^[a-f\d]{24}$/i.test(msg.id) && editingMessageId !== msg.id && (
+                        <button
+                          type="button"
+                          className="message-icon-button"
+                          title="Edit message"
+                          aria-label="Edit message"
+                          onClick={() => { setEditedMessageDraft(msg.text); setEditingMessageId(msg.id) }}
+                          disabled={isTyping}
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg>
+                        </button>
+                      )}
+                      {msg.sender === 'user' && activeHistoryId && conversationVersions.some((version) => version.editedMessageId === msg.id) && (
+                        <button
+                          type="button"
+                          className="message-icon-button"
+                          title="View message versions"
+                          aria-label="View message versions"
+                          onClick={() => handleOpenMessageVersions(msg.id)}
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 2.64-6.36L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>
+                        </button>
                       )}
                     </div>
 
@@ -642,6 +843,33 @@ export default function App() {
             </div>
           )}
         </div>
+
+        {showVersionsModal && (
+          <div className="versions-modal-backdrop" onClick={() => setShowVersionsModal(false)}>
+            <section
+              className="versions-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="versions-modal-title"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <header className="versions-modal-header">
+                <div className="versions-modal-controls">
+                  <button type="button" onClick={() => handleChangeModalVersion(versionModalPosition - 1)} disabled={versionModalPosition <= 0} aria-label="Previous version">‹</button>
+                  <h2 id="versions-modal-title">Version {versionModalPosition + 1}</h2>
+                  <button type="button" onClick={() => handleChangeModalVersion(versionModalPosition + 1)} disabled={versionModalPosition >= versionModalVersions.length} aria-label="Next version">›</button>
+                </div>
+                <button className="versions-modal-close" type="button" onClick={() => setShowVersionsModal(false)} aria-label="Close versions">×</button>
+              </header>
+              {versionModalTurn ? (
+                <div className="version-preview-thread">
+                  <div className="version-preview-user">{versionModalTurn.user}</div>
+                  {versionModalTurn.assistant && <div className="version-preview-assistant">{versionModalTurn.assistant}</div>}
+                </div>
+              ) : <p className="version-preview-empty">This version could not be loaded.</p>}
+            </section>
+          </div>
+        )}
 
         {/* Docked Prompt Box for ongoing chat */}
         {messages.length > 0 && (

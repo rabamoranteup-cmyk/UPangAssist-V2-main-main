@@ -187,6 +187,18 @@
   white-space: nowrap;
 }
 
+.history-title-input {
+  min-width: 0;
+  flex: 1;
+  padding: 3px 5px;
+  border: 1px solid rgba(223, 158, 40, 0.65);
+  border-radius: 5px;
+  outline: none;
+  background: rgba(0, 0, 0, 0.18);
+  color: #ffffff;
+  font: inherit;
+}
+
 .history-delete-btn {
   display: none;
   background: transparent;
@@ -622,6 +634,207 @@
   border-radius: 16px;
   line-height: 1.55;
   font-size: 0.94rem;
+}
+
+.message-action-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  margin-top: 3px;
+}
+
+.message-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 27px;
+  height: 27px;
+  padding: 5px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #758078;
+  cursor: pointer;
+}
+
+.message-icon-button:hover {
+  background: rgba(22, 54, 37, 0.08);
+  color: #163625;
+}
+
+.message-icon-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.message-icon-button svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.edit-message-form {
+  min-width: min(420px, 65vw);
+}
+
+.edit-message-form textarea {
+  display: block;
+  width: 100%;
+  min-height: 76px;
+  resize: vertical;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.12);
+  color: #ffffff;
+  font: inherit;
+}
+
+.edit-message-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.edit-message-actions button {
+  padding: 5px 9px;
+  border: 1px solid rgba(22, 54, 37, 0.18);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #163625;
+  font: inherit;
+  cursor: pointer;
+}
+
+.edit-message-actions button[type="submit"] {
+  background: #163625;
+  color: #ffffff;
+}
+
+.edit-message-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.versions-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: #ffffff;
+  background: rgba(12, 24, 16, 0.48);
+  backdrop-filter: blur(2px);
+}
+
+.versions-modal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  max-height: min(620px, 86vh);
+  min-height: 300px;
+  overflow: auto;
+  border: 1px solid rgba(20, 35, 25, 0.12);
+  border-radius: 16px;
+  background: #ffffff;
+  color: #202124;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.24);
+}
+
+.versions-modal-header {
+  position: relative;
+  flex: 0 0 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 48px;
+}
+
+.versions-modal-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.versions-modal-controls h2 {
+  min-width: 78px;
+  margin: 0;
+  color: #202124;
+  font-size: 1rem;
+  font-weight: 500;
+  text-align: center;
+}
+
+.versions-modal-controls button,
+.versions-modal-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  background: transparent;
+  color: #74777a;
+  font-size: 1.35rem;
+  cursor: pointer;
+}
+
+.versions-modal-controls button:hover,
+.versions-modal-close:hover {
+  color: #202124;
+}
+
+.versions-modal-controls button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.versions-modal-close {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  color: #252729;
+  font-size: 1.45rem;
+}
+
+.version-preview-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  width: calc(100% - 48px);
+  margin: 16px auto 28px;
+}
+
+.version-preview-user {
+  align-self: flex-end;
+  max-width: 80%;
+  padding: 12px 17px;
+  border-radius: 22px;
+  background: #e8f2fc;
+  color: #304760;
+  font-size: 0.94rem;
+  line-height: 1.5;
+}
+
+.version-preview-assistant {
+  align-self: stretch;
+  color: #303134;
+  font-size: 0.98rem;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.version-preview-empty {
+  margin: 48px auto;
+  color: #70757a;
+  text-align: center;
 }
 
 .message-user .message-bubble {
