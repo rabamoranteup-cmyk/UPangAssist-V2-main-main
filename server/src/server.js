@@ -1,4 +1,4 @@
-﻿const path = require("path");
+const path = require("path");
 require("dotenv").config({ path: path.join(__dirname, "../.env") });
 
 const express = require("express");
@@ -16,6 +16,7 @@ const conversationRoutes = require("./routes/conversationRoutes");
 const Conversation = require("./models/Conversation");
 const ConversationVersion = require("./models/ConversationVersion");
 const { findSemanticReferences } = require("./semanticSearch");
+const { generateAnswerFromKnowledge, NO_SUPPORTED_ANSWER } = require("./services/answerGeneration");
 const { getKnowledgeBase, refreshKnowledgeBase, initializeKnowledgeBase } = require("./services/knowledgeBase");
 const knowledgeRoutes = require("./routes/knowledgeRoutes");
 
@@ -69,7 +70,11 @@ const searchWordAliases = {
   clothes: ["dress", "uniform"],
   clothing: ["dress", "uniform"],
   aid: ["scholarship", "financial"],
-  hk: ["hawak", "kamay", "scholarship"]
+  hk: ["hawak", "kamay", "scholarship"],
+  enroll: ["enrollment", "registration", "admission"],
+  enrollment: ["enroll", "registration", "admission"],
+  register: ["registration", "enroll", "enrollment"],
+  registration: ["register", "enroll", "enrollment"]
 };
 
 function getSearchWords(value) {
@@ -145,47 +150,6 @@ async function saveChatTurn(conversation, question, answer, references = []) {
   await conversation.save();
 }
 
-const NO_SUPPORTED_ANSWER = "NO_SUPPORTED_ANSWER";
-
-function formatKnowledgeContext(references) {
-  return references.map((reference, index) => [
-    `Database reference ${index + 1}`,
-    `Category: ${reference.category}`,
-    `Question/topic: ${reference.question}`,
-    `Answer: ${reference.answer}`
-  ].join("\n")).join("\n\n");
-}
-
-async function generateAnswerFromKnowledge(question, references) {
-  const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-  const model = process.env.OLLAMA_MODEL || "llama3.2:1b";
-  const context = formatKnowledgeContext(references);
-  const response = await fetch(`${baseUrl}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model,
-      messages: [
-        {
-          role: "system",
-          content: `You are UPangAssist. Answer the user's question naturally and clearly using only facts supported by the database references below. You may paraphrase, combine, and organize those facts so the answer feels conversational. Do not add outside knowledge, assumptions, policies, dates, fees, contact details, or other facts. If the references do not support an answer, reply with exactly ${NO_SUPPORTED_ANSWER} and nothing else.\n\nDatabase references:\n${context}`
-        },
-        { role: "user", content: question }
-      ],
-      options: { num_predict: 180, temperature: 0.2 },
-      stream: false
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`Ollama request failed (${response.status})`);
-  }
-  const data = await response.json();
-  const answer = data.message?.content?.trim();
-  if (!answer) throw new Error("Ollama returned an empty answer");
-  return answer;
-}
-
 app.post("/api/chat", requireAuth, async (req, res) => {
   const question = typeof req.body?.question === "string" ? req.body.question.trim() : "";
 
@@ -203,23 +167,24 @@ app.post("/api/chat", requireAuth, async (req, res) => {
   let references = findRelevantReferences(question);
   try {
     const semanticReferences = await findSemanticReferences(question, getKnowledgeBase());
-    if (semanticReferences.length > 0) references = semanticReferences;
+    references = [...new Map(
+      [...references, ...semanticReferences].map((reference) => [
+        `${reference.category}\u0000${reference.question}`,
+        reference
+      ])
+    ).values()].slice(0, 5);
   } catch (error) {
     console.warn("Semantic search unavailable; using keyword search:", error.message);
-  }
-
-  if (references.length === 0) {
-    return res.status(204).end();
   }
 
   let answer;
   try {
     answer = await generateAnswerFromKnowledge(question, references);
   } catch (error) {
-    console.error("Database-grounded answer generation failed:", error.message);
-    return res.status(503).json({ error: "Unable to generate an answer from the knowledge database" });
+    console.error("Answer generation failed:", error.message);
+    return res.status(503).json({ error: "Unable to generate an answer" });
   }
-  if (answer === NO_SUPPORTED_ANSWER) {
+  if (references.length > 0 && answer === NO_SUPPORTED_ANSWER) {
     return res.status(204).end();
   }
 
@@ -260,22 +225,24 @@ app.post("/api/conversations/:id/edit", requireAuth, async (req, res) => {
     let references = findRelevantReferences(editedContent);
     try {
       const semanticReferences = await findSemanticReferences(editedContent, getKnowledgeBase());
-      if (semanticReferences.length) references = semanticReferences;
+      references = [...new Map(
+        [...references, ...semanticReferences].map((reference) => [
+          `${reference.category}\u0000${reference.question}`,
+          reference
+        ])
+      ).values()].slice(0, 5);
     } catch (error) {
       console.warn("Semantic search unavailable during message edit:", error.message);
     }
 
-    if (references.length === 0) {
-      return res.status(204).end();
-    }
     let answer;
     try {
       answer = await generateAnswerFromKnowledge(editedContent, references);
     } catch (error) {
-      console.error("Database-grounded answer regeneration failed:", error.message);
-      return res.status(503).json({ error: "Unable to generate an answer from the knowledge database" });
+      console.error("Answer regeneration failed:", error.message);
+      return res.status(503).json({ error: "Unable to generate an answer" });
     }
-    if (answer === NO_SUPPORTED_ANSWER) {
+    if (references.length > 0 && answer === NO_SUPPORTED_ANSWER) {
       return res.status(204).end();
     }
 

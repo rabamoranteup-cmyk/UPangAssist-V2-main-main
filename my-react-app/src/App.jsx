@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import upangLogo from './assets/upang logo.png'
 import campusPhoto from './assets/UpangCampus.jpg'
 import './Landing.css'
