@@ -535,7 +535,20 @@ async function startServer() {
       console.log(`Server running on http://localhost:${process.env.PORT || 3000}`);
     });
   } catch (error) {
-    console.error("MongoDB connection error:", error.name);
+    // Include the connection failure reason while masking credentials if a
+    // MongoDB URI is ever included in a driver error message.
+    const redactMongoCredentials = (value) => String(value).replace(
+      /(mongodb(?:\+srv)?:\/\/[^:\s/@]+:)[^@\s]+@/gi,
+      "$1[REDACTED]@"
+    );
+    console.error(
+      "MongoDB connection error:",
+      error.name,
+      redactMongoCredentials(error.message)
+    );
+    if (error.reason?.message) {
+      console.error("MongoDB connection details:", redactMongoCredentials(error.reason.message));
+    }
     process.exit(1);
   }
 }
