@@ -24,6 +24,7 @@ export default function App() {
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState([])
   const [isTyping, setIsTyping] = useState(false)
+  const [chatNotice, setChatNotice] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [activeHistoryId, setActiveHistoryId] = useState(null)
   const [historyList, setHistoryList] = useState([])
@@ -166,6 +167,7 @@ export default function App() {
     setMessages((prev) => [...prev, userMessage])
     setInput('')
     setIsTyping(true)
+    setChatNotice('')
 
     const assistantMsgId = getNextId('asst_msg')
     const assistantTimestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -186,6 +188,11 @@ export default function App() {
 
       const persistedConversationId = response.headers.get('X-Conversation-Id')
       if (persistedConversationId) setActiveHistoryId(persistedConversationId)
+
+      if (response.status === 204) {
+        setChatNotice('The database references do not support an answer to this question.')
+        return
+      }
 
       if (!response.ok) {
         throw new Error('Chat request failed')
@@ -257,19 +264,7 @@ export default function App() {
       }
     } catch (err) {
       console.error('Chat error:', err)
-      setMessages((prev) => {
-        const exists = prev.some((m) => m.id === assistantMsgId)
-        const fallbackMsg = {
-          id: assistantMsgId,
-          sender: 'assistant',
-          text: `I couldn't send that message. ${err.message || 'Please try again.'}`,
-          followUps: [],
-          timestamp: assistantTimestamp,
-        }
-        return exists
-          ? prev.map((m) => (m.id === assistantMsgId ? fallbackMsg : m))
-          : [...prev, fallbackMsg]
-      })
+      setChatNotice('Could not retrieve a database answer. Please try again.')
     } finally {
       setIsTyping(false)
     }
@@ -281,6 +276,7 @@ export default function App() {
 
   const handleNewConversation = () => {
     setMessages([])
+    setChatNotice('')
     setInput('')
     setActiveHistoryId(null)
     setConversationVersions([])
@@ -293,6 +289,7 @@ export default function App() {
   }
 
   const handleSelectHistory = (item) => {
+    setChatNotice('')
     setActiveHistoryId(item.id)
     setEditingMessageId(null)
     setShowVersionsModal(false)
@@ -361,6 +358,7 @@ export default function App() {
     const content = editedMessageDraft.trim()
     setEditingMessageId(null)
     if (!content || content === message.text || !activeHistoryId) return
+    setChatNotice('')
     setMessages((items) => {
       const editedIndex = items.findIndex((item) => item.id === message.id)
       if (editedIndex < 0) return items
@@ -375,6 +373,11 @@ export default function App() {
         method: 'POST',
         body: JSON.stringify({ messageId: message.id, content }),
       })
+      if (!conversation) {
+        setMessages((items) => items.map((item) => item.id === message.id ? { ...item, text: message.text } : item))
+        setChatNotice('The database references do not support an answer to the edited question.')
+        return
+      }
       const withVersionMetadata = await apiRequest(`/conversations/${activeHistoryId}`)
       setMessages(conversation.messages.map((savedMessage) => ({
         id: savedMessage._id,
@@ -389,13 +392,8 @@ export default function App() {
         : item))
     } catch (error) {
       console.error('Unable to edit conversation message:', error)
-      setMessages((items) => [...items, {
-        id: getNextId('edit_error'),
-        sender: 'assistant',
-        text: `I couldn't edit that message. ${error.message || 'Please try again.'}`,
-        followUps: [],
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      }])
+      setMessages((items) => items.map((item) => item.id === message.id ? { ...item, text: message.text } : item))
+      setChatNotice('No database answer was generated for the edited question.')
     } finally {
       setIsTyping(false)
     }
@@ -874,6 +872,7 @@ export default function App() {
         {/* Docked Prompt Box for ongoing chat */}
         {messages.length > 0 && (
           <div className="chat-composer-wrap">
+            {chatNotice && <p className="chat-source-notice" role="status">{chatNotice}</p>}
             <form
               className="prompt-box prompt-box-docked"
               onSubmit={(e) => {

@@ -16,7 +16,7 @@ const conversationRoutes = require("./routes/conversationRoutes");
 const Conversation = require("./models/Conversation");
 const ConversationVersion = require("./models/ConversationVersion");
 const { findSemanticReferences } = require("./semanticSearch");
-const { getKnowledgeBase, initializeKnowledgeBase } = require("./services/knowledgeBase");
+const { getKnowledgeBase, refreshKnowledgeBase, initializeKnowledgeBase } = require("./services/knowledgeBase");
 const knowledgeRoutes = require("./routes/knowledgeRoutes");
 
 const app = express();
@@ -114,143 +114,6 @@ function findRelevantReferences(question) {
     .map((item) => item.reference);
 }
 
-function findSpecificBuildingReference(question) {
-  const lower = question.toLowerCase();
-  const campusReference = getKnowledgeBase().find((reference) =>
-    (reference.category || "").toLowerCase().includes("campus navigation")
-  );
-
-  if (!campusReference) return null;
-
-  const buildingNames = [
-    "main building",
-    "cea building",
-    "cite building",
-    "university library",
-    "university gymnasium"
-  ];
-  const requestedBuilding = buildingNames.find((building) => lower.includes(building));
-
-  if (!requestedBuilding) return null;
-
-  const buildingEntry = campusReference.answer
-    .split("â€¢")
-    .map((entry) => entry.trim())
-    .find((entry) => entry.toLowerCase().startsWith(`${requestedBuilding}:`));
-
-  if (!buildingEntry) return null;
-
-  return {
-    ...campusReference,
-    answer: `â€¢ ${buildingEntry}`
-  };
-}
-
-function findUnverifiedBuildingName(question) {
-  const match = question.match(/\b([a-z0-9-]{3,})\s+building\b/i);
-  const buildingName = match?.[1]?.toLowerCase();
-  if (!buildingName || ["the", "this", "that"].includes(buildingName)) return null;
-
-  const verifiedText = getKnowledgeBase()
-    .map((reference) => [reference.category, reference.question, reference.answer].filter(Boolean).join(" "))
-    .join(" ")
-    .toLowerCase();
-
-  return verifiedText.includes(buildingName) ? null : match[1];
-}
-
-function formatReferences(references) {
-  if (references.length === 0) {
-    return "No matching verified UPang reference was found in the knowledge base.";
-  }
-
-  return references.map((reference, index) => [
-    `Reference ${index + 1}`,
-    `Category: ${reference.category || "Not specified"}`,
-    `Question/topic: ${reference.question || "Not specified"}`,
-    `Information: ${reference.answer || "Not specified"}`
-  ].join("\n")).join("\n\n");
-}
-
-
-async function streamAnswerWithOllama(question, referenceContext, res) {
-  const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-  const model = process.env.OLLAMA_MODEL || "llama3.2:1b";
-
-  const systemInstruction = `You are UPangAssist, a university information assistant for PHINMA University of Pangasinan (UPang).
-Answer student questions factually, warmly, and concisely using the verified UPang references below.
-Keep answers brief and straight to the point (under 3-4 sentences when possible).
-If you lack enough information, clearly say that there is no verified reference for the specific question and recommend contacting the official UPang office.
-
-Verified UPang references:
-${referenceContext}`;
-
-  const response = await fetch(`${baseUrl}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: systemInstruction },
-        { role: "user", content: question }
-      ],
-      options: {
-        num_predict: 160,
-        temperature: 0.3
-      },
-      stream: true
-    })
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Ollama request failed (${response.status}): ${errorText}`);
-  }
-
-  res.setHeader("Content-Type", "text/plain; charset=utf-8");
-  res.setHeader("Transfer-Encoding", "chunked");
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let answer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const parsed = JSON.parse(line);
-        if (parsed.message?.content) {
-          answer += parsed.message.content;
-          res.write(parsed.message.content);
-        }
-      } catch {
-        // ignore incomplete JSON chunk
-      }
-    }
-  }
-
-  if (buffer.trim()) {
-    try {
-      const parsed = JSON.parse(buffer);
-      if (parsed.message?.content) {
-        answer += parsed.message.content;
-        res.write(parsed.message.content);
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  return answer;
-}
-
 async function getOrCreateConversation(req, question) {
   const conversationId = req.body?.conversationId;
   if (conversationId !== undefined && !mongoose.isValidObjectId(conversationId)) {
@@ -282,83 +145,61 @@ async function saveChatTurn(conversation, question, answer, references = []) {
   await conversation.save();
 }
 
-async function generateAnswerWithOllama(question, referenceContext) {
+const NO_SUPPORTED_ANSWER = "NO_SUPPORTED_ANSWER";
+
+function formatKnowledgeContext(references) {
+  return references.map((reference, index) => [
+    `Database reference ${index + 1}`,
+    `Category: ${reference.category}`,
+    `Question/topic: ${reference.question}`,
+    `Answer: ${reference.answer}`
+  ].join("\n")).join("\n\n");
+}
+
+async function generateAnswerFromKnowledge(question, references) {
   const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
   const model = process.env.OLLAMA_MODEL || "llama3.2:1b";
-
-  const systemInstruction = `You are UPangAssist, a helpful and student-friendly university information assistant for PHINMA University of Pangasinan (UPang).
-Answer strictly using the verified UPang references supplied below. Never invent or hallucinate policies, requirements, fees, dates, or contact details.
-Keep your answers brief and straight to the point (under 3-4 sentences).
-
-Verified UPang references:
-${referenceContext}`;
-
+  const context = formatKnowledgeContext(references);
   const response = await fetch(`${baseUrl}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model,
       messages: [
-        { role: "system", content: systemInstruction },
+        {
+          role: "system",
+          content: `You are UPangAssist. Answer the user's question naturally and clearly using only facts supported by the database references below. You may paraphrase, combine, and organize those facts so the answer feels conversational. Do not add outside knowledge, assumptions, policies, dates, fees, contact details, or other facts. If the references do not support an answer, reply with exactly ${NO_SUPPORTED_ANSWER} and nothing else.\n\nDatabase references:\n${context}`
+        },
         { role: "user", content: question }
       ],
-      options: {
-        num_predict: 160,
-        temperature: 0.3
-      },
+      options: { num_predict: 180, temperature: 0.2 },
       stream: false
     })
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Ollama request failed (${response.status}): ${errorText}`);
+    throw new Error(`Ollama request failed (${response.status})`);
   }
-
   const data = await response.json();
-  return data.message?.content?.trim();
+  const answer = data.message?.content?.trim();
+  if (!answer) throw new Error("Ollama returned an empty answer");
+  return answer;
 }
 
 app.post("/api/chat", requireAuth, async (req, res) => {
   const question = typeof req.body?.question === "string" ? req.body.question.trim() : "";
-  const wantStream = req.body?.stream === true || req.query?.stream === "true";
 
   if (!question || question.length > 12000) {
     return res.status(400).json({ error: "question is required and must be at most 12000 characters" });
   }
 
-  let conversation;
   try {
-    conversation = await getOrCreateConversation(req, question);
+    await refreshKnowledgeBase();
   } catch (error) {
-    return res.status(error.status || 500).json({ error: error.status ? error.message : "Unable to save conversation" });
+    console.error("Knowledge database read failed:", error.message);
+    return res.status(503).json({ error: "Knowledge database unavailable" });
   }
 
-  const unverifiedBuilding = findUnverifiedBuildingName(question);
-  if (unverifiedBuilding) {
-    const message = `I do not have a verified UPang reference for the ${unverifiedBuilding} Building location. Please contact Campus Administration or the relevant college office for the current location.`;
-    await saveChatTurn(conversation, question, message);
-    if (wantStream) {
-      res.setHeader("Content-Type", "text/plain; charset=utf-8");
-      res.setHeader("X-Conversation-Id", conversation._id.toString());
-      return res.end(message);
-    }
-    return res.json({ text: message, provider: "verified_reference_check", conversationId: conversation._id });
-  }
-
-  const specificBuilding = findSpecificBuildingReference(question);
-  if (specificBuilding) {
-  const specificBuildingText = specificBuilding.answer;
-    await saveChatTurn(conversation, question, specificBuildingText, [specificBuilding]);
-    if (wantStream) {
-      res.setHeader("Content-Type", "text/plain; charset=utf-8");
-      res.setHeader("X-Conversation-Id", conversation._id.toString());
-      return res.end(specificBuildingText);
-    }
-    return res.json({ text: specificBuildingText, provider: "instant_knowledge_base", conversationId: conversation._id });
-  }
-
-  // Semantic search handles paraphrases; keyword search remains a safe fallback.
   let references = findRelevantReferences(question);
   try {
     const semanticReferences = await findSemanticReferences(question, getKnowledgeBase());
@@ -366,60 +207,29 @@ app.post("/api/chat", requireAuth, async (req, res) => {
   } catch (error) {
     console.warn("Semantic search unavailable; using keyword search:", error.message);
   }
-  const referenceContext = formatReferences(references);
-  const provider = (process.env.LLM_PROVIDER || "ollama").toLowerCase();
 
+  if (references.length === 0) {
+    return res.status(204).end();
+  }
+
+  let answer;
   try {
-    // 2. Streamed generation with local LLM for real-time word-by-word display
-    if (provider === "ollama" && wantStream) {
-      res.setHeader("X-Conversation-Id", conversation._id.toString());
-      const answer = await streamAnswerWithOllama(question, referenceContext, res);
-      await saveChatTurn(conversation, question, answer, references);
-      res.end();
-      return;
-    }
-
-    let text = "";
-    if (provider === "ollama") {
-      text = await generateAnswerWithOllama(question, referenceContext);
-    } else {
-      text = references.length > 0
-        ? references[0].answer
-        : "I do not have enough verified information to answer this question. Please contact the appropriate UPang office for assistance.";
-    }
-
-    if (!text) {
-      return res.status(502).json({ error: "Chatbot returned an empty answer" });
-    }
-
-    await saveChatTurn(conversation, question, text, references);
-    return res.json({ text, provider, conversationId: conversation._id });
+    answer = await generateAnswerFromKnowledge(question, references);
   } catch (error) {
-    console.error(`Chat error (${provider}):`, error.message);
+    console.error("Database-grounded answer generation failed:", error.message);
+    return res.status(503).json({ error: "Unable to generate an answer from the knowledge database" });
+  }
+  if (answer === NO_SUPPORTED_ANSWER) {
+    return res.status(204).end();
+  }
 
-    // If local LLM is starting up or temporarily unavailable, use direct reference fallback
-    if (references.length > 0) {
-      const top = references[0];
-      const fallbackText = top.answer;
-      await saveChatTurn(conversation, question, fallbackText, references);
-      if (wantStream) {
-        res.setHeader("Content-Type", "text/plain; charset=utf-8");
-        res.setHeader("X-Conversation-Id", conversation._id.toString());
-        return res.end(fallbackText);
-      }
-      return res.json({ text: fallbackText, fallback: true, conversationId: conversation._id });
-    }
-
-    // Keep the chat usable when the optional AI provider is offline and the
-    // question has no matching knowledge-base entry.
-    const unavailableText = "I couldn't find a verified UPang answer for that question right now. I can help with enrollment, Registrar services, tuition payments, scholarships, campus locations, and student wellness services. For other concerns, please contact the appropriate official UPang office.";
-    await saveChatTurn(conversation, question, unavailableText);
-    if (wantStream) {
-      res.setHeader("Content-Type", "text/plain; charset=utf-8");
-      res.setHeader("X-Conversation-Id", conversation._id.toString());
-      return res.end(unavailableText);
-    }
-    return res.json({ text: unavailableText, fallback: true, conversationId: conversation._id });
+  let conversation;
+  try {
+    conversation = await getOrCreateConversation(req, question);
+    await saveChatTurn(conversation, question, answer, references);
+    return res.json({ text: answer, provider: "database_grounded", conversationId: conversation._id });
+  } catch (error) {
+    return res.status(error.status || 500).json({ error: error.status ? error.message : "Unable to save conversation" });
   }
 });
 
@@ -446,6 +256,7 @@ app.post("/api/conversations/:id/edit", requireAuth, async (req, res) => {
       return res.status(409).json({ error: "Only the latest user message can be edited" });
     }
 
+    await refreshKnowledgeBase();
     let references = findRelevantReferences(editedContent);
     try {
       const semanticReferences = await findSemanticReferences(editedContent, getKnowledgeBase());
@@ -454,18 +265,18 @@ app.post("/api/conversations/:id/edit", requireAuth, async (req, res) => {
       console.warn("Semantic search unavailable during message edit:", error.message);
     }
 
-    const referenceContext = formatReferences(references);
-    const provider = (process.env.LLM_PROVIDER || "ollama").toLowerCase();
-    const verifiedFallback = references.length
-      ? references[0].answer
-      : "I couldn't find a verified UPang answer for that question. Please contact the appropriate official UPang office for assistance.";
-    let answer = verifiedFallback;
-    if (provider === "ollama") {
-      try {
-        answer = await generateAnswerWithOllama(editedContent, referenceContext) || verifiedFallback;
-      } catch (error) {
-        console.warn("AI regeneration unavailable; using verified reference fallback:", error.message);
-      }
+    if (references.length === 0) {
+      return res.status(204).end();
+    }
+    let answer;
+    try {
+      answer = await generateAnswerFromKnowledge(editedContent, references);
+    } catch (error) {
+      console.error("Database-grounded answer regeneration failed:", error.message);
+      return res.status(503).json({ error: "Unable to generate an answer from the knowledge database" });
+    }
+    if (answer === NO_SUPPORTED_ANSWER) {
+      return res.status(204).end();
     }
 
     const priorMessages = conversation.messages.map((message) => message.toObject({ depopulate: true }));
@@ -554,3 +365,6 @@ async function startServer() {
 }
 
 startServer();
+
+
+
