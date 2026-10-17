@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import upangLogo from './assets/upang logo.png'
 import campusPhoto from './assets/UpangCampus.jpg'
 import './Landing.css'
@@ -41,6 +41,7 @@ export default function App() {
   const [editedMessageDraft, setEditedMessageDraft] = useState('')
 
   const [currentUser, setCurrentUser] = useState(null)
+  const [loginNotice, setLoginNotice] = useState('')
   const [authLoading, setAuthLoading] = useState(true)
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
@@ -67,12 +68,12 @@ export default function App() {
           setCurrentUser(data.user || null)
           const wantsAdmin = window.location.pathname === '/admin'
           if (wantsAdmin && data.user?.role !== 'admin') window.history.replaceState({}, '', '/')
-          setView(data.user ? (wantsAdmin && data.user.role === 'admin' ? 'admin' : 'assistant') : 'home')
+          setView(data.user ? (wantsAdmin && data.user.role === 'admin' ? 'admin' : 'assistant') : new URLSearchParams(window.location.search).has('oauth_error') ? 'login' : window.location.pathname === '/verify-email' ? 'verify-email' : window.location.pathname === '/signup' ? 'signup' : window.location.pathname === '/login' ? 'login' : 'home')
         }
       } catch {
         if (!cancelled) {
           setCurrentUser(null)
-          setView(new URLSearchParams(window.location.search).has('oauth_error') ? 'login' : 'home')
+          setView(new URLSearchParams(window.location.search).has('oauth_error') ? 'login' : window.location.pathname === '/verify-email' ? 'verify-email' : window.location.pathname === '/signup' ? 'signup' : window.location.pathname === '/login' ? 'login' : 'home')
         }
       } finally {
         if (!cancelled) {
@@ -89,8 +90,25 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    const handleAuthExpired = () => {
+      setCurrentUser(null)
+      setMessages([])
+      setHistoryList([])
+      setActiveHistoryId(null)
+      setView('login')
+      setShowLogoutConfirm(false)
+      apiRequest('/auth/logout', { method: 'POST' }).catch(() => {})
+    }
+    window.addEventListener('auth:expired', handleAuthExpired)
+    return () => window.removeEventListener('auth:expired', handleAuthExpired)
+  }, [])
+
+  useEffect(() => {
     const syncAdminRoute = () => {
-      if (window.location.pathname === '/admin') {
+      if (window.location.pathname === '/verify-email') setView('verify-email')
+      else if (window.location.pathname === '/signup') setView('signup')
+      else if (window.location.pathname === '/login') setView('login')
+      else if (window.location.pathname === '/admin') {
         if (currentUser?.role === 'admin') setView('admin')
         else {
           window.history.replaceState({}, '', '/')
@@ -190,7 +208,7 @@ export default function App() {
       if (persistedConversationId) setActiveHistoryId(persistedConversationId)
 
       if (response.status === 204) {
-        setChatNotice('The database references do not support an answer to this question.')
+        setChatNotice('No answer was returned for this question.')
         return
       }
 
@@ -264,7 +282,7 @@ export default function App() {
       }
     } catch (err) {
       console.error('Chat error:', err)
-      setChatNotice('Could not retrieve a database answer. Please try again.')
+      setChatNotice('Could not generate a response. Please try again.')
     } finally {
       setIsTyping(false)
     }
@@ -375,7 +393,7 @@ export default function App() {
       })
       if (!conversation) {
         setMessages((items) => items.map((item) => item.id === message.id ? { ...item, text: message.text } : item))
-        setChatNotice('The database references do not support an answer to the edited question.')
+        setChatNotice('No answer was returned for the edited question.')
         return
       }
       const withVersionMetadata = await apiRequest(`/conversations/${activeHistoryId}`)
@@ -393,7 +411,7 @@ export default function App() {
     } catch (error) {
       console.error('Unable to edit conversation message:', error)
       setMessages((items) => items.map((item) => item.id === message.id ? { ...item, text: message.text } : item))
-      setChatNotice('No database answer was generated for the edited question.')
+      setChatNotice(error.message || 'Could not generate an answer for the edited question.')
     } finally {
       setIsTyping(false)
     }
@@ -440,16 +458,19 @@ export default function App() {
     )
   }
   if (view === 'login') {
-    return <LoginPage onLogin={(user) => { setCurrentUser(user); setView('assistant') }} onSignUp={() => setView('signup')} onForgotPassword={() => setView('forgot-password')} />
+    return <LoginPage successMessage={loginNotice} onLogin={(user) => { setCurrentUser(user); setView('assistant') }} onSignUp={() => { window.history.pushState({}, '', '/signup'); setView('signup') }} onForgotPassword={() => setView('forgot-password')} />
   }
   if (view === 'signup') {
-    return <SignupPage onRegistered={(user) => { setCurrentUser(user); setView('assistant') }} onBack={() => setView('login')} />
+    return <SignupPage onContinue={() => { window.history.pushState({}, '', '/verify-email'); setView('verify-email') }} onBack={() => { window.history.pushState({}, '', '/login'); setView('login') }} />
+  }
+  if (view === 'verify-email') {
+    return <OtpVerificationPage onVerified={(message) => { setLoginNotice(message); window.history.replaceState({}, '', '/login'); setView('login') }} onBack={() => { window.history.pushState({}, '', '/signup'); setView('signup') }} />
   }
   if (view === 'forgot-password') {
     return <ForgotPasswordPage onBack={() => setView('login')} />
   }
   if (view === 'home') {
-    return <LandingPage onLogin={() => setView('login')} onSignUp={() => setView('signup')} />
+    return <LandingPage onLogin={() => { window.history.pushState({}, '', '/login'); setView('login') }} onSignUp={() => { window.history.pushState({}, '', '/signup'); setView('signup') }} />
   }
   if (view === 'admin' && currentUser?.role === 'admin') {
     return <AdminKnowledge onBack={closeAdminPage} />
@@ -466,12 +487,12 @@ export default function App() {
             aria-describedby="logout-confirm-message"
             onClick={(event) => event.stopPropagation()}
           >
-            <span className="logout-confirm-mark" aria-hidden="true">↗</span>
+            <span className="logout-confirm-mark" aria-hidden="true">?</span>
             <h2 id="logout-confirm-title">Log Out</h2>
             <p id="logout-confirm-message">Are you sure you want to log out?</p>
             <div className="logout-confirm-actions">
               <button className="logout-cancel-btn" type="button" onClick={() => setShowLogoutConfirm(false)} disabled={loggingOut}>Cancel</button>
-              <button className="logout-accept-btn" type="button" onClick={handleLogout} disabled={loggingOut}>{loggingOut ? 'Logging Out…' : 'Log Out'}</button>
+              <button className="logout-accept-btn" type="button" onClick={handleLogout} disabled={loggingOut}>{loggingOut ? 'Logging Out�' : 'Log Out'}</button>
             </div>
           </section>
         </div>
@@ -499,7 +520,7 @@ export default function App() {
             onClick={() => setSidebarOpen(false)}
             aria-label="Close sidebar"
           >
-            âœ•
+            ✕
           </button>
         </div>
 
@@ -562,7 +583,7 @@ export default function App() {
                 title="Delete conversation"
                 aria-label="Delete item"
               >
-                âœ•
+                ✕
               </button>
             </li>
           ))}
@@ -576,7 +597,7 @@ export default function App() {
 
         {currentUser?.role === 'admin' && (
           <button className="new-conversation" type="button" onClick={openAdminPage}>
-            <span aria-hidden="true">⚙</span><span>Manage Knowledge</span>
+            <span aria-hidden="true">?</span><span>Manage Knowledge</span>
           </button>
         )}
 
@@ -697,7 +718,7 @@ export default function App() {
                     onClick={() => setInput('')}
                     aria-label="Clear input text"
                   >
-                    âœ•
+                    ✕
                   </button>
                 )}
                 <button
@@ -706,7 +727,7 @@ export default function App() {
                   aria-label="Send message"
                   disabled={!input.trim() || isTyping}
                 >
-                  <span className="send-arrow" aria-hidden="true">â†’</span>
+                  <span className="send-arrow" aria-hidden="true">→</span>
                 </button>
               </form>
 
@@ -853,11 +874,11 @@ export default function App() {
             >
               <header className="versions-modal-header">
                 <div className="versions-modal-controls">
-                  <button type="button" onClick={() => handleChangeModalVersion(versionModalPosition - 1)} disabled={versionModalPosition <= 0} aria-label="Previous version">‹</button>
+                  <button type="button" onClick={() => handleChangeModalVersion(versionModalPosition - 1)} disabled={versionModalPosition <= 0} aria-label="Previous version">�</button>
                   <h2 id="versions-modal-title">Version {versionModalPosition + 1}</h2>
-                  <button type="button" onClick={() => handleChangeModalVersion(versionModalPosition + 1)} disabled={versionModalPosition >= versionModalVersions.length} aria-label="Next version">›</button>
+                  <button type="button" onClick={() => handleChangeModalVersion(versionModalPosition + 1)} disabled={versionModalPosition >= versionModalVersions.length} aria-label="Next version">�</button>
                 </div>
-                <button className="versions-modal-close" type="button" onClick={() => setShowVersionsModal(false)} aria-label="Close versions">×</button>
+                <button className="versions-modal-close" type="button" onClick={() => setShowVersionsModal(false)} aria-label="Close versions">�</button>
               </header>
               {versionModalTurn ? (
                 <div className="version-preview-thread">
@@ -897,7 +918,7 @@ export default function App() {
                   onClick={() => setInput('')}
                   aria-label="Clear input text"
                 >
-                  âœ•
+                  ✕
                 </button>
               )}
               <button
@@ -906,7 +927,7 @@ export default function App() {
                 aria-label="Send message"
                 disabled={!input.trim() || isTyping}
               >
-                <span className="send-arrow" aria-hidden="true">â†’</span>
+                <span className="send-arrow" aria-hidden="true">→</span>
               </button>
             </form>
           </div>
@@ -934,7 +955,7 @@ function formatMarkdown(text) {
 
   for (let line of lines) {
     const trimmed = line.trim()
-    if (trimmed.startsWith('â€¢ ') || trimmed.startsWith('- ')) {
+    if (trimmed.startsWith('• ') || trimmed.startsWith('- ')) {
       if (!inList) {
         result.push('<ul class="chat-md-list">')
         inList = true
@@ -960,7 +981,7 @@ function formatMarkdown(text) {
   return result.join('')
 }
 
-function LoginPage({ onLogin, onSignUp, onForgotPassword }) {
+function LoginPage({ onLogin, onSignUp, onForgotPassword, successMessage = '' }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -975,6 +996,13 @@ function LoginPage({ onLogin, onSignUp, onForgotPassword }) {
       google_state_invalid: 'Google sign-in could not be verified. Please try again.',
       google_unverified: 'Google could not verify this account.',
       google_account_unregistered: 'This Google account is not registered in UPang Assist.',
+      google_configuration_error: 'Google sign-in configuration is invalid. Contact support.',
+      google_credentials_invalid: 'Google sign-in credentials are missing or invalid in the server configuration.',
+      google_redirect_mismatch: 'Google rejected the callback URL. It must exactly match the authorized redirect URI in Google Cloud Console.',
+      google_code_exchange_failed: 'Google could not complete sign-in. Please try again.',
+      google_identity_failed: 'Google could not confirm your account details. Please try again.',
+      google_database_unavailable: 'UPang Assist could not check your registered account. Please try again shortly.',
+      google_session_failed: 'Your Google account was verified, but UPang Assist could not start your session. Please try again.',
       google_failed: 'Google sign-in failed. Please try again.',
     }
     return messages[code] || ''
@@ -982,6 +1010,10 @@ function LoginPage({ onLogin, onSignUp, onForgotPassword }) {
   const handleSubmit = async (event) => {
     event.preventDefault()
     setError('')
+    if (/\s/.test(password)) {
+      setError('Password must not contain spaces.')
+      return
+    }
     setSubmitting(true)
     try {
       const data = await apiRequest('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) })
@@ -997,8 +1029,9 @@ function LoginPage({ onLogin, onSignUp, onForgotPassword }) {
       <section className="login-visual" aria-label="University campus"><div className="login-visual-overlay"></div><div className="login-visual-copy"><div className="visual-emblem-badge"><img src={upangLogo} alt="PHINMA UPang Logo" className="visual-logo-img" /></div><span>PHINMA</span><strong>University of Pangasinan</strong></div></section>
       <section className="login-panel"><div className="login-content">
         <p className="login-kicker">WELCOME!</p><h1>To <span>Upang Assist</span></h1><h2>Log In</h2>
-        <form className="login-form" onSubmit={handleSubmit}>
-          <label htmlFor="login-email">School Email Address:</label><div className="input-with-icon"><input id="login-email" type="email" placeholder="student@your-school-domain.edu.ph" value={email} onChange={(event) => setEmail(event.target.value)} required /></div>
+        {successMessage && <p className="recovery-feedback recovery-feedback-info" role="status">{successMessage}</p>}
+        <form className="login-form" onSubmit={handleSubmit} noValidate>
+          <label htmlFor="login-email">School Email Address:</label><div className="input-with-icon"><input id="login-email" type="email" placeholder="student.example.up@phinmaed.com" value={email} onChange={(event) => setEmail(event.target.value)} required /></div>
           <label htmlFor="login-password">Password:</label><div className="input-with-icon"><input id="login-password" type={showPassword ? 'text' : 'password'} placeholder="Enter your password" value={password} onChange={(event) => setPassword(event.target.value)} required /><button type="button" className="password-toggle-btn" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? 'Hide' : 'Show'}</button></div><button className="forgot-link forgot-link-below" type="button" onClick={onForgotPassword}>Forgot password?</button>
           {error && <p className="login-error" role="alert">{error}</p>}
           <button className="login-submit" type="submit" disabled={submitting}>{submitting ? 'LOGGING IN...' : 'LOG IN'}</button>
@@ -1023,6 +1056,12 @@ function ForgotPasswordPage({ onBack }) {
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState('')
   const [feedbackType, setFeedbackType] = useState('')
+  const [resendSeconds, setResendSeconds] = useState(0)
+  useEffect(() => {
+    if (step !== 'otp' || resendSeconds <= 0) return undefined
+    const timer = window.setTimeout(() => setResendSeconds((seconds) => Math.max(0, seconds - 1)), 1000)
+    return () => window.clearTimeout(timer)
+  }, [step, resendSeconds])
   function refreshChallenge() {
     setChallenge(makeRecoveryChallenge())
     setCaptchaAnswer('')
@@ -1043,12 +1082,26 @@ function ForgotPasswordPage({ onBack }) {
       setMessage(result.message)
       setFeedbackType('info')
       setStep('otp')
+      setResendSeconds(60)
     } catch (error) {
       setMessage(error.message)
       setFeedbackType('error')
     } finally {
       setSubmitting(false)
     }
+  }
+  async function handleResendOtp() {
+    setSubmitting(true)
+    setMessage('')
+    try {
+      const result = await apiRequest('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) })
+      setMessage(result.message)
+      setFeedbackType('info')
+      setResendSeconds(60)
+    } catch (error) {
+      setMessage(error.message)
+      setFeedbackType('error')
+    } finally { setSubmitting(false) }
   }
   async function handleVerifyOtp(event) {
     event.preventDefault()
@@ -1089,6 +1142,7 @@ function ForgotPasswordPage({ onBack }) {
     setConfirmPassword('')
     setResetToken('')
     setStep('email')
+    setResendSeconds(0)
     setMessage('')
     setFeedbackType('')
     refreshChallenge()
@@ -1096,23 +1150,24 @@ function ForgotPasswordPage({ onBack }) {
   return (
     <main className="login-page recovery-login-page">
       <section className="login-visual" aria-label="University campus"><div className="login-visual-overlay"></div><div className="login-visual-copy"><div className="visual-emblem-badge"><img src={upangLogo} alt="PHINMA UPang Logo" className="visual-logo-img" /></div><span>PHINMA</span><strong>University of Pangasinan</strong></div></section>
-      <section className="login-panel"><button className="login-back-btn" type="button" onClick={onBack}><span className="back-arrow">←</span><span>Back to Login</span></button><div className="login-content recovery-content">
+      <section className="login-panel"><button className="login-back-btn" type="button" onClick={onBack}><span className="back-arrow">&#8592;</span><span>Back to Login</span></button><div className="login-content recovery-content">
         <p className="login-kicker">ACCOUNT HELP</p><h1>To <span>Upang Assist</span></h1><h2>Forgot Password?</h2>
         <p className="recovery-copy">{step === 'email' ? 'Enter your registered PHINMA email to request a one-time password.' : step === 'otp' ? `Enter the six-digit code sent to ${email}.` : step === 'password' ? 'Choose a new password for your account.' : 'Your password has been updated.'}</p>
         {step === 'email' && <form className="login-form recovery-form" onSubmit={handleRequestOtp}>
-          <label htmlFor="recovery-email">Enter Registered PHINMA Email</label><div className="input-with-icon"><input id="recovery-email" type="email" placeholder="name@phinmaed.com" value={email} onChange={(event) => { setEmail(event.target.value); setMessage(''); setFeedbackType('') }} required /></div>
+          <label htmlFor="recovery-email">Enter Registered PHINMA Email</label><div className="input-with-icon"><input id="recovery-email" type="email" placeholder="student.example.up@phinmaed.com" value={email} onChange={(event) => { setEmail(event.target.value); setMessage(''); setFeedbackType('') }} required /></div>
           <div className="recovery-challenge" aria-label="Email verification question">
             <output>{challenge.first}</output><span>+</span><output>{challenge.second}</output><span>=</span>
             <input aria-label="Answer to verification question" inputMode="numeric" pattern="[0-9]*" value={captchaAnswer} onChange={(event) => { setCaptchaAnswer(event.target.value); setMessage(''); setFeedbackType('') }} required />
-            <button className="challenge-refresh" type="button" aria-label="Refresh verification question" onClick={refreshChallenge}>↻</button>
+            <button className="challenge-refresh" type="button" aria-label="Refresh verification question" onClick={refreshChallenge}>?</button>
           </div>
           {message && <p className={`recovery-feedback recovery-feedback-${feedbackType}`} role={feedbackType === 'error' ? 'alert' : 'status'}>{message}</p>}
-          <div className="recovery-actions"><button type="submit" className="login-submit" disabled={submitting}>{submitting ? 'SENDING...' : 'SEND OTP'}</button><button type="button" className="recovery-cancel-btn" onClick={handleCancel}>Cancel</button></div>
+          <div className="recovery-actions"><button type="submit" className="login-submit" disabled={submitting}>{submitting ? 'SENDING...' : 'SEND OTP'}</button></div>
         </form>}
         {step === 'otp' && <form className="login-form recovery-form" onSubmit={handleVerifyOtp}>
           <label htmlFor="recovery-otp">One-Time Password</label><div className="input-with-icon"><input id="recovery-otp" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} placeholder="Enter 6-digit code" value={otp} onChange={(event) => { setOtp(event.target.value.replace(/\D/g, '').slice(0, 6)); setMessage(''); setFeedbackType('') }} required /></div>
-          {message && <p className="recovery-feedback recovery-feedback-error" role="alert">{message}</p>}
+          {message && <p className={`recovery-feedback recovery-feedback-${feedbackType}`} role={feedbackType === 'error' ? 'alert' : 'status'}>{message}</p>}
           <div className="recovery-actions"><button type="submit" className="login-submit" disabled={submitting}>{submitting ? 'VERIFYING...' : 'VERIFY OTP'}</button><button type="button" className="recovery-cancel-btn" onClick={handleCancel}>Cancel</button></div>
+          <p className="recovery-resend-row">{resendSeconds > 0 ? `Resend code in ${resendSeconds}s` : <button className="forgot-link" type="button" onClick={handleResendOtp} disabled={submitting}>Resend OTP</button>}</p>
         </form>}
         {step === 'password' && <form className="login-form recovery-form" onSubmit={handleResetPassword}>
           <label htmlFor="recovery-password">New Password</label><div className="input-with-icon"><input id="recovery-password" type="password" minLength={8} maxLength={128} autoComplete="new-password" placeholder="At least 8 characters" value={password} onChange={(event) => { setPassword(event.target.value); setMessage(''); setFeedbackType('') }} required /></div>
@@ -1133,60 +1188,166 @@ function makeRecoveryChallenge() {
   return { first, second, answer: first + second }
 }
 
-function SignupPage({ onBack, onRegistered }) {
+function SignupPage({ onBack, onContinue }) {
   const [form, setForm] = useState({ name: '', email: '', course: '', password: '', confirmPassword: '' })
-  const [step, setStep] = useState('details')
-  const [otp, setOtp] = useState('')
   const [error, setError] = useState('')
+  const [accountExists, setAccountExists] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const handleChange = (event) => { const { name, value } = event.target; setForm((current) => ({ ...current, [name]: value })) }
+  const [retrySeconds, setRetrySeconds] = useState(0)
+  const [rateLimited, setRateLimited] = useState(false)
+  const [fieldErrors, setFieldErrors] = useState({})
+  useEffect(() => {
+    if (retrySeconds <= 0) return undefined
+    const timer = window.setTimeout(() => setRetrySeconds((seconds) => Math.max(0, seconds - 1)), 1000)
+    return () => window.clearTimeout(timer)
+  }, [retrySeconds])
+  const handleChange = (event) => {
+    const { name, value } = event.target
+    setForm((current) => ({ ...current, [name]: value }))
+    setFieldErrors((current) => {
+      const next = { ...current }
+      delete next[name]
+      if (name === 'password') delete next.confirmPassword
+      return next
+    })
+    if (!rateLimited) setError('')
+    if (name === 'email') setAccountExists(false)
+  }
   const handleSubmit = async (event) => {
-    event.preventDefault(); setError(''); setSubmitting(true)
-    try {
-      await apiRequest('/auth/register/request-otp', { method: 'POST', body: JSON.stringify(form) })
-      setStep('otp')
+    event.preventDefault(); setError(''); setRateLimited(false); setRetrySeconds(0)
+    const registrationDetails = {
+      ...form,
+      name: form.name.trim(),
+      email: form.email.trim(),
+      course: form.course.trim(),
     }
-    catch (requestError) { setError(requestError.message) }
-    finally { setSubmitting(false) }
-  }
-  const handleVerifyOtp = async (event) => {
-    event.preventDefault(); setError(''); setSubmitting(true)
+    const nextFieldErrors = {}
+    if (!registrationDetails.name) nextFieldErrors.name = 'Full Name is required.'
+    else if (!/^[a-zA-Z\s]+$/.test(registrationDetails.name)) nextFieldErrors.name = 'Full Name must only contain letters and spaces.'
+    else if (registrationDetails.name.length < 2 || registrationDetails.name.length > 100) nextFieldErrors.name = 'Full Name must be between 2 and 100 characters.'
+    if (!/^[^\s@]+@phinmaed\.com$/i.test(registrationDetails.email)) nextFieldErrors.email = 'Enter a valid email ending in @phinmaed.com.'
+    if (!registrationDetails.course) nextFieldErrors.course = 'Course is required.'
+    else if (registrationDetails.course.length > 150) nextFieldErrors.course = 'Course must not exceed 150 characters.'
+    if (form.password.length < 8) nextFieldErrors.password = 'Password must be at least 8 characters.'
+    else if (/\s/.test(form.password)) nextFieldErrors.password = 'Password must not contain spaces.'
+    if (!form.confirmPassword) nextFieldErrors.confirmPassword = 'Confirm Password is required.'
+    else if (form.password !== form.confirmPassword) nextFieldErrors.confirmPassword = 'Passwords do not match.'
+    setFieldErrors(nextFieldErrors)
+    if (Object.keys(nextFieldErrors).length > 0) return
+
+    setSubmitting(true)
     try {
-      const verification = await apiRequest('/auth/register/verify-otp', { method: 'POST', body: JSON.stringify({ email: form.email, otp }) })
-      const data = await apiRequest('/auth/register', { method: 'POST', body: JSON.stringify({ email: form.email, registrationToken: verification.registrationToken }) })
-      onRegistered(data.user)
-    } catch (requestError) { setError(requestError.message) }
+      const result = await apiRequest('/auth/register/request-otp', { method: 'POST', body: JSON.stringify(registrationDetails) })
+      if (result.verificationRequired !== true) throw new Error('Email verification could not be started. Please try again.')
+      onContinue()
+    }
+    catch (requestError) {
+      if (requestError.status === 409) setAccountExists(true)
+      else if (requestError.code === 'REGISTRATION_OTP_RECENTLY_SENT' && requestError.verificationRequired) {
+        onContinue()
+      }
+      else {
+        setError(requestError.message)
+        if (requestError.status === 429 && requestError.retryAfterSeconds > 0) {
+          setRateLimited(true)
+          setRetrySeconds(requestError.retryAfterSeconds)
+        }
+      }
+    }
     finally { setSubmitting(false) }
   }
+  const fieldProps = (name) => ({
+    className: fieldErrors[name] ? 'input-with-icon has-error' : 'input-with-icon',
+    'aria-invalid': Boolean(fieldErrors[name]),
+    'aria-describedby': fieldErrors[name] ? `signup-${name}-error` : undefined
+  })
+  const fieldError = (name) => fieldErrors[name] && <p id={`signup-${name}-error`} className="signup-field-error" role="alert">{fieldErrors[name]}</p>
   return (
     <main className="login-page signup-page">
       <section className="login-visual" aria-label="University campus"><div className="login-visual-overlay"></div><div className="login-visual-copy"><div className="visual-emblem-badge"><img src={upangLogo} alt="PHINMA UPang Logo" className="visual-logo-img" /></div><span>PHINMA</span><strong>University of Pangasinan</strong></div></section>
-      <section className="login-panel"><button className="login-back-btn" type="button" onClick={onBack}><span className="back-arrow">←</span><span>Back to Login</span></button><div className="login-content signup-content">
-        <p className="login-kicker">WELCOME!</p><h1>To <span>Upang Assist</span></h1><h2>{step === 'details' ? 'Create Account' : 'Verify Your Email'}</h2>
-        {step === 'details' ? <form className="login-form" onSubmit={handleSubmit}>
-          <label htmlFor="signup-name">Full Name:</label><div className="input-with-icon"><input id="signup-name" name="name" value={form.name} onChange={handleChange} required /></div>
-          <label htmlFor="signup-email">School Email Address:</label><div className="input-with-icon"><input id="signup-email" name="email" type="email" value={form.email} onChange={handleChange} required /></div>
-          <label htmlFor="signup-course">Course:</label><div className="input-with-icon"><input id="signup-course" name="course" value={form.course} onChange={handleChange} required /></div>
-          <label htmlFor="signup-password">Password:</label><div className="input-with-icon"><input id="signup-password" name="password" type="password" value={form.password} onChange={handleChange} minLength={8} required /></div>
-          <label htmlFor="signup-confirm-password">Confirm Password:</label><div className="input-with-icon"><input id="signup-confirm-password" name="confirmPassword" type="password" value={form.confirmPassword} onChange={handleChange} minLength={8} required /></div>
-          {error && <p className="login-error" role="alert">{error}</p>}<button className="login-submit signup-submit" type="submit" disabled={submitting}>{submitting ? 'SENDING CODE...' : 'CREATE ACCOUNT'}</button>
-        </form> : <form className="login-form" onSubmit={handleVerifyOtp}>
-          <p className="recovery-copy">Enter the six-digit code sent to {form.email}. Your account will be created after verification.</p>
-          <label htmlFor="signup-otp">Email Verification Code:</label><div className="input-with-icon"><input id="signup-otp" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} placeholder="Enter 6-digit code" value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} required /></div>
-          {error && <p className="login-error" role="alert">{error}</p>}<button className="login-submit signup-submit" type="submit" disabled={submitting}>{submitting ? 'VERIFYING...' : 'VERIFY EMAIL'}</button>
-          <button className="signup-edit-btn" type="button" onClick={() => { setStep('details'); setError(''); setOtp('') }}>Edit account details</button>
-        </form>}
+      <section className="login-panel"><button className="login-back-btn" type="button" onClick={onBack}><span className="back-arrow">&#8592;</span><span>Back to Login</span></button><div className="login-content signup-content">
+        <p className="login-kicker">WELCOME!</p><h1>To <span>Upang Assist</span></h1><h2>Create Account</h2>
+        <form className="login-form" onSubmit={handleSubmit} noValidate>
+          <label htmlFor="signup-name">Full Name:</label><div {...fieldProps("name")}><input id="signup-name" name="name" value={form.name} onChange={handleChange} minLength={2} maxLength={100} required /></div>{fieldError("name")}
+          <label htmlFor="signup-email">School Email Address:</label><div {...fieldProps("email")}><input id="signup-email" name="email" type="email" placeholder="student.example.up@phinmaed.com" value={form.email} onChange={handleChange} required /></div>{fieldError("email")}
+          <label htmlFor="signup-course">Course:</label><div {...fieldProps("course")}><input id="signup-course" name="course" value={form.course} onChange={handleChange} maxLength={150} required /></div>{fieldError("course")}
+          <label htmlFor="signup-password">Password:</label><div {...fieldProps("password")}><input id="signup-password" name="password" type="password" autoComplete="new-password" value={form.password} onChange={handleChange} minLength={8} maxLength={128} required /></div>{fieldError("password")}
+          <label htmlFor="signup-confirm-password">Confirm Password:</label><div {...fieldProps("confirmPassword")}><input id="signup-confirm-password" name="confirmPassword" type="password" autoComplete="new-password" value={form.confirmPassword} onChange={handleChange} minLength={8} maxLength={128} required /></div>{fieldError("confirmPassword")}
+          {accountExists && <div className="login-error" role="alert"><p>An account with this email already exists.</p><button type="button" className="signup-edit-btn" onClick={onBack}>Go to sign in</button></div>}
+          {error && (!rateLimited || retrySeconds > 0) && <p className="login-error" role="alert">{error}{rateLimited && retrySeconds > 0 ? ` Retry in ${Math.floor(retrySeconds / 60)}:${String(retrySeconds % 60).padStart(2, '0')}.` : ''}</p>}<button className="login-submit signup-submit" type="submit" disabled={submitting || accountExists || retrySeconds > 0}>{submitting ? 'SENDING CODE...' : 'CREATE ACCOUNT'}</button>
+        </form>
         <p className="login-footer">Already have an account? <button type="button" onClick={onBack}>Log in</button></p>
       </div></section>
     </main>
   )
 }
+
+function OtpVerificationPage({ onVerified, onBack }) {
+  const [email, setEmail] = useState('')
+  const [otp, setOtp] = useState('')
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [resendAt, setResendAt] = useState(0)
+  const [now, setNow] = useState(0)
+  const [submitting, setSubmitting] = useState(false)
+  useEffect(() => {
+    let active = true
+    apiRequest('/auth/register/pending')
+      .then((pending) => { if (active) { setEmail(pending.email); setResendAt(pending.resendAt || 0) } })
+      .catch((requestError) => { if (active) setError(requestError.message) })
+    return () => { active = false }
+  }, [])
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+  const remaining = Math.max(0, Math.ceil((resendAt - now) / 1000))
+  const handleVerify = async (event) => {
+    event.preventDefault(); setError(''); setNotice(''); setSubmitting(true)
+    try {
+      const result = await apiRequest('/auth/register/verify-otp', { method: 'POST', body: JSON.stringify({ otp }) })
+      if (result.verified !== true || result.accountCreated !== true || typeof result.email !== 'string') {
+        throw new Error('Email verification is not complete yet. Enter the code sent to your email and try again.')
+      }
+      onVerified(result.message || 'Account verified successfully! You can now log in.')
+    } catch (requestError) { setError(requestError.message) }
+    finally { setSubmitting(false) }
+  }
+  const handleResend = async () => {
+    setError(''); setNotice(''); setSubmitting(true)
+    try {
+      const result = await apiRequest('/auth/register/resend-otp', { method: 'POST' })
+      setResendAt(result.resendAt); setOtp(''); setNotice(result.message)
+    } catch (requestError) {
+      setError(requestError.message)
+      if (requestError.resendAt) setResendAt(requestError.resendAt)
+    } finally { setSubmitting(false) }
+  }
+  return (
+    <main className="login-page recovery-login-page">
+      <section className="login-visual" aria-label="University campus"><div className="login-visual-overlay"></div><div className="login-visual-copy"><div className="visual-emblem-badge"><img src={upangLogo} alt="PHINMA UPang Logo" className="visual-logo-img" /></div><span>PHINMA</span><strong>University of Pangasinan</strong></div></section>
+      <section className="login-panel"><button className="login-back-btn" type="button" onClick={onBack}><span className="back-arrow">&#8592;</span><span>Back to Registration</span></button><div className="login-content recovery-content">
+        <p className="login-kicker">WELCOME!</p><h1>To <span>Upang Assist</span></h1><h2>Verify Your School Email</h2>
+        <p className="recovery-copy">We've sent a 6-digit verification code to your school email address.{email ? <> <strong>{email}</strong></> : null}</p>
+        {notice && <p className="recovery-feedback recovery-feedback-info" role="status">{notice}</p>}
+        <form className="login-form recovery-form" onSubmit={handleVerify}>
+          <label htmlFor="signup-otp">Six-digit verification code</label><div className="input-with-icon"><input id="signup-otp" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} placeholder="Enter 6-digit code" value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} required /></div>
+          {error && <p className="login-error" role="alert">{error}</p>}
+          <div className="recovery-actions"><button className="login-submit" type="submit" disabled={submitting || otp.length !== 6}>{submitting ? 'VERIFYING...' : 'VERIFY ACCOUNT'}</button><button className="recovery-cancel-btn" type="button" onClick={onBack}>Back to Registration</button></div>
+        </form>
+        <p className="recovery-resend-row">{now === 0 ? 'Checking resend availability�' : remaining > 0 ? `Resend code in ${remaining}s` : <button className="forgot-link" type="button" onClick={handleResend} disabled={submitting}>Resend OTP</button>}</p>
+        {error && !email && <p className="login-footer"><button type="button" onClick={onBack}>Return to registration</button></p>}
+      </div></section>
+    </main>
+  )
+}
+
 function LandingPage({ onLogin, onSignUp }) {
   const topics = [
-    { number: '01', title: 'Campus & offices', copy: 'Find the right building, office, or service before you set off.', icon: 'âŒ–' },
-    { number: '02', title: 'Enrollment', copy: 'Get a clearer picture of advising, registration, and your next steps.', icon: 'â†—' },
-    { number: '03', title: 'Tuition & scholarships', copy: 'Explore payment channels, school fees, and scholarship guidance.', icon: 'â‚±' },
-    { number: '04', title: 'Student support', copy: 'Know where to go for health, wellness, and everyday help.', icon: 'â™¡' },
+    { number: '01', title: 'Campus & offices', copy: 'Find the right building, office, or service before you set off.', icon: '⌖' },
+    { number: '02', title: 'Enrollment', copy: 'Get a clearer picture of advising, registration, and your next steps.', icon: '↗' },
+    { number: '03', title: 'Tuition & scholarships', copy: 'Explore payment channels, school fees, and scholarship guidance.', icon: '₱' },
+    { number: '04', title: 'Student support', copy: 'Know where to go for health, wellness, and everyday help.', icon: '♡' },
   ]
 
   return (
@@ -1202,7 +1363,7 @@ function LandingPage({ onLogin, onSignUp }) {
         </nav>
         <div className="landing-nav-actions">
           <button className="landing-login" onClick={onLogin}>Log in</button>
-          <button className="landing-nav-cta" onClick={onSignUp}>Get started <span>â†—</span></button>
+          <button className="landing-nav-cta" onClick={onSignUp}>Get started <span>↗</span></button>
         </div>
       </header>
 
@@ -1212,8 +1373,8 @@ function LandingPage({ onLogin, onSignUp }) {
           <h1>University life,<br />with a <em>little less</em><br />figuring it out.</h1>
           <p className="landing-intro">A helpful place to start when you have a question about campus, enrollment, tuition, or student support at UPang.</p>
           <div className="landing-hero-actions">
-            <button className="landing-primary" onClick={onSignUp}>Ask your first question <span>â†—</span></button>
-            <button className="landing-secondary" onClick={onLogin}>I already have an account <span>â†’</span></button>
+            <button className="landing-primary" onClick={onSignUp}>Ask your first question <span>↗</span></button>
+            <button className="landing-secondary" onClick={onLogin}>I already have an account <span>→</span></button>
           </div>
           <div className="landing-trust"><span className="trust-emblem"><img src={upangLogo} alt="" /></span><span>Made for the UPang community<br /><strong>Here when you need a hand.</strong></span></div>
         </div>
@@ -1224,8 +1385,8 @@ function LandingPage({ onLogin, onSignUp }) {
           <div className="chat-preview">
             <div className="chat-preview-top"><span className="chat-preview-avatar"><img src={upangLogo} alt="" /></span><span><strong>UPang Assist</strong><small>Here to help you find your way</small></span><i></i></div>
             <p className="chat-preview-question">Where can I get help with enrollment?</p>
-            <div className="chat-preview-answer"><span className="answer-spark">âœ³</span><p>Start with your college advising office for your course plan. I can also help you find registration steps and where to go next.</p></div>
-            <div className="chat-preview-bottom"><span>Ask about your campus</span><span className="chat-send">â†‘</span></div>
+            <div className="chat-preview-answer"><span className="answer-spark">✳</span><p>Start with your college advising office for your course plan. I can also help you find registration steps and where to go next.</p></div>
+            <div className="chat-preview-bottom"><span>Ask about your campus</span><span className="chat-send">↑</span></div>
           </div>
           <span className="visual-note">A good place<br />to begin.</span>
         </div>
@@ -1233,12 +1394,12 @@ function LandingPage({ onLogin, onSignUp }) {
       </section>
 
       <section className="landing-topics" id="how-it-helps">
-        <div className="topics-heading"><div><span className="section-kicker">A HAND WITH THE EVERYDAY</span><h2>Whatâ€™s on your mind?</h2></div><p>From â€œwhere do I go?â€ to â€œwhat do I do next?â€â€”start with a question and find your next step.</p></div>
-        <div className="topic-grid">{topics.map((topic) => <article className="topic-card" key={topic.number}><div className="topic-card-top"><span>{topic.number}</span><span className="topic-icon">{topic.icon}</span></div><h3>{topic.title}</h3><p>{topic.copy}</p><span className="topic-arrow">â†—</span></article>)}</div>
+        <div className="topics-heading"><div><span className="section-kicker">A HAND WITH THE EVERYDAY</span><h2>What’s on your mind?</h2></div><p>From “where do I go?” to “what do I do next?”—start with a question and find your next step.</p></div>
+        <div className="topic-grid">{topics.map((topic) => <article className="topic-card" key={topic.number}><div className="topic-card-top"><span>{topic.number}</span><span className="topic-icon">{topic.icon}</span></div><h3>{topic.title}</h3><p>{topic.copy}</p><span className="topic-arrow">↗</span></article>)}</div>
       </section>
 
-      <section className="landing-quote" id="about"><span className="quote-mark">â€œ</span><div><p>Big campus, lots of questions.<br /><em>Start anywhere.</em></p><span>UPANG ASSIST Â· YOUR STUDENT SUPPORT COMPANION</span></div><button onClick={onLogin}>Letâ€™s get started <span>â†—</span></button></section>
-      <footer className="landing-footer"><a className="landing-brand" href="#top"><span className="landing-brand-mark"><img src={upangLogo} alt="" /></span><span><strong>UPang Assist</strong><small>PHINMA University of Pangasinan</small></span></a><span>For the questions that come with campus life.</span><button onClick={onLogin}>Student log in â†—</button></footer>
+      <section className="landing-quote" id="about"><span className="quote-mark">“</span><div><p>Big campus, lots of questions.<br /><em>Start anywhere.</em></p><span>UPANG ASSIST · YOUR STUDENT SUPPORT COMPANION</span></div><button onClick={onLogin}>Let’s get started <span>↗</span></button></section>
+      <footer className="landing-footer"><a className="landing-brand" href="#top"><span className="landing-brand-mark"><img src={upangLogo} alt="" /></span><span><strong>UPang Assist</strong><small>PHINMA University of Pangasinan</small></span></a><span>For the questions that come with campus life.</span><button onClick={onLogin}>Student log in ↗</button></footer>
     </main>
   )
 }

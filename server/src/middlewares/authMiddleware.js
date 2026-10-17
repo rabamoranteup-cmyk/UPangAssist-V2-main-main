@@ -18,6 +18,9 @@ async function authenticate(req, res, next, optional = false) {
     }
 
     const payload = verifyAccessToken(token);
+    if (Number.isFinite(payload.exp)) {
+      res.setHeader("X-Auth-Expires-At", String(payload.exp * 1000));
+    }
 
 
     const user = await User.findById(payload.sub).select(

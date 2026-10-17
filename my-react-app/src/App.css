@@ -1,5 +1,5 @@
-﻿/* ==========================================================================
-   UPang Assist â€” Clean & Modern Campus AI Interface
+/* ==========================================================================
+   UPang Assist — Clean & Modern Campus AI Interface
    PHINMA University of Pangasinan
    ========================================================================== */
 
@@ -1190,6 +1190,7 @@
 .recovery-feedback { margin: 0; font-size: .82rem; line-height: 1.5; }
 .recovery-feedback-info { color: #8a5b12; }
 .recovery-feedback-error { color: #b42318; }
+.recovery-resend-row { margin: 0; color: #627267; font-size: .82rem; line-height: 1.5; text-align: center; }
 .recovery-content .login-footer { margin-top: 16px; }
 
 @media (max-width: 480px) {
@@ -1435,6 +1436,17 @@
   text-decoration: underline;
 }
 
+.signup-resend-row {
+  margin: 0;
+  color: #627267;
+  font-size: 0.84rem;
+  text-align: center;
+}
+
+.signup-resend-row .signup-edit-btn {
+  font-size: inherit;
+}
+
 .terms-row {
   display: flex;
   flex-direction: column;
@@ -1551,6 +1563,18 @@
   .social-login {
     grid-template-columns: 1fr;
   }
+}
+.signup-content .input-with-icon.has-error,
+.signup-content .input-with-icon.has-error:focus-within {
+  border-color: #b42318;
+  box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.1);
+}
+
+.signup-field-error {
+  margin: -8px 0 0;
+  color: #b42318;
+  font-size: 0.78rem;
+  line-height: 1.4;
 }
 .login-error {
   margin: 8px 0;

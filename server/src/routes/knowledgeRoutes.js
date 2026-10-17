@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const KnowledgeEntry = require("../models/KnowledgeEntry");
 const { requireAuth, requireRole } = require("../middlewares/authMiddleware");
 const { refreshKnowledgeBase } = require("../services/knowledgeBase");
+const { createKnowledgeSearchFields } = require("../services/knowledgeIndex");
 
 const router = express.Router();
 router.use(requireAuth, requireRole("admin"));
@@ -18,6 +19,13 @@ function validateEntry(body = {}) {
   return { entry };
 }
 
+function toPublicEntry(document) {
+  const entry = document.toObject ? document.toObject() : { ...document };
+  delete entry.searchKeywords;
+  delete entry.embedding;
+  return entry;
+}
+
 router.get("/", async (_req, res) => {
   try { return res.json(await KnowledgeEntry.find().sort({ category: 1, question: 1 }).lean()); }
   catch { return res.status(500).json({ error: "Unable to load chatbot knowledge" }); }
@@ -27,9 +35,10 @@ router.post("/", async (req, res) => {
   const { entry, error } = validateEntry(req.body);
   if (error) return res.status(400).json({ error });
   try {
-    const created = await KnowledgeEntry.create(entry);
-    await refreshKnowledgeBase();
-    return res.status(201).json(created);
+    const searchFields = await createKnowledgeSearchFields(entry);
+    const created = await KnowledgeEntry.create({ ...entry, ...searchFields });
+    await refreshKnowledgeBase({ force: true });
+    return res.status(201).json(toPublicEntry(created));
   } catch { return res.status(500).json({ error: "Unable to save knowledge entry" }); }
 });
 
@@ -38,10 +47,15 @@ router.patch("/:id", async (req, res) => {
   const { entry, error } = validateEntry(req.body);
   if (error) return res.status(400).json({ error });
   try {
-    const updated = await KnowledgeEntry.findByIdAndUpdate(req.params.id, entry, { new: true, runValidators: true });
+    const searchFields = await createKnowledgeSearchFields(entry);
+    const updated = await KnowledgeEntry.findByIdAndUpdate(
+      req.params.id,
+      { $set: { ...entry, ...searchFields } },
+      { new: true, runValidators: true }
+    );
     if (!updated) return res.status(404).json({ error: "Knowledge entry not found" });
-    await refreshKnowledgeBase();
-    return res.json(updated);
+    await refreshKnowledgeBase({ force: true });
+    return res.json(toPublicEntry(updated));
   } catch { return res.status(500).json({ error: "Unable to update knowledge entry" }); }
 });
 
@@ -50,7 +64,7 @@ router.delete("/:id", async (req, res) => {
   try {
     const deleted = await KnowledgeEntry.findByIdAndDelete(req.params.id);
     if (!deleted) return res.status(404).json({ error: "Knowledge entry not found" });
-    await refreshKnowledgeBase();
+    await refreshKnowledgeBase({ force: true });
     return res.json({ message: "Knowledge entry deleted" });
   } catch { return res.status(500).json({ error: "Unable to delete knowledge entry" }); }
 });

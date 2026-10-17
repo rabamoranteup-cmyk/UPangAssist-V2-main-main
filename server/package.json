@@ -8,6 +8,8 @@
     "dev": "node --watch src/server.js",
     "verify:email": "node src/verifyRecoveryEmail.js",
     "knowledge:sync-atlas": "node src/syncLocalKnowledgeToAtlas.js",
+    "knowledge:seed-departments": "node src/seedUniversityDepartments.js",
+    "knowledge:seed-general": "node src/seedUniversityGeneralKnowledge.js",
     "admin:create": "node src/createAdmin.js"
   },
   "dependencies": {
@@ -16,6 +18,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^5.2.1",
+    "express-mongo-sanitize": "^2.2.0",
     "express-rate-limit": "^8.3.0",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",

@@ -10,6 +10,8 @@ const userSchema = new mongoose.Schema(
       maxlength: 100
     },
 
+    username: { type: String, trim: true, maxlength: 100 },
+
     email: {
       type: String,
       required: true,
@@ -19,18 +21,24 @@ const userSchema = new mongoose.Schema(
       index: true
     },
 
+    emailVerifiedAt: { type: Date, default: null },
+
     course: {
       type: String,
-      required: true,
+      required: function courseRequired() { return this.authProvider !== "google"; },
       trim: true,
       maxlength: 150
     },
 
     passwordHash: {
       type: String,
-      required: true,
+      required: function passwordRequired() { return this.authProvider !== "google"; },
       select: false
     },
+
+    authProvider: { type: String, enum: ["local", "google"], default: "local", required: true },
+    googleId: { type: String, sparse: true, unique: true },
+    avatar: { type: String, trim: true, maxlength: 2048 },
 
     role: {
       type: String,

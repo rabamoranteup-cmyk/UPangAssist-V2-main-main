@@ -1,4 +1,9 @@
 const nodemailer = require("nodemailer");
+const path = require("path");
+
+// Load the same server-only mail configuration whether this utility is used
+// through the API server or the standalone email verification command.
+require("dotenv").config({ path: path.join(__dirname, "../../.env") });
 
 function createRecoveryTransport() {
   const host = process.env.SMTP_HOST;

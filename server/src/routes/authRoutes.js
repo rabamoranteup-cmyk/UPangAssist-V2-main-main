@@ -4,8 +4,9 @@ const { requireAuth, optionalAuth } = require("../middlewares/authMiddleware");
 
 
 const {
-  register,
   requestRegistrationOtp,
+  getPendingRegistration,
+  resendRegistrationOtp,
   verifyRegistrationOtp,
   login,
   requestPasswordReset,
@@ -37,17 +38,36 @@ const recoveryLimiter = rateLimit({
   message: { error: "Too many password recovery attempts. Try again later." }
 });
 
-const registrationLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 10,
-  standardHeaders: "draft-8",
-  legacyHeaders: false,
-  message: { error: "Too many registration verification attempts. Try again later." }
-});
+function registrationLimiter({ windowMs, limit }) {
+  return rateLimit({
+    windowMs,
+    limit,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    handler(req, res) {
+      const resetAt = req.rateLimit?.resetTime?.getTime();
+      const retryAfterSeconds = resetAt
+        ? Math.max(1, Math.ceil((resetAt - Date.now()) / 1000))
+        : Math.ceil(windowMs / 1000);
+      return res.status(429).json({
+        error: "Too many registration verification attempts. Try again later.",
+        retryAfterSeconds
+      });
+    }
+  });
+}
 
-router.post("/register/request-otp", registrationLimiter, requestRegistrationOtp);
-router.post("/register/verify-otp", registrationLimiter, verifyRegistrationOtp);
-router.post("/register", registrationLimiter, register);
+// Keep endpoint counters separate: page restoration and OTP verification should
+// not consume the budget for starting a registration or requesting a new code.
+const registrationRequestLimiter = registrationLimiter({ windowMs: 15 * 60 * 1000, limit: 10 });
+const registrationVerificationLimiter = registrationLimiter({ windowMs: 15 * 60 * 1000, limit: 10 });
+const registrationResendLimiter = registrationLimiter({ windowMs: 15 * 60 * 1000, limit: 10 });
+const registrationSessionLimiter = registrationLimiter({ windowMs: 60 * 1000, limit: 60 });
+
+router.post("/register/request-otp", registrationRequestLimiter, requestRegistrationOtp);
+router.get("/register/pending", registrationSessionLimiter, getPendingRegistration);
+router.post("/register/resend-otp", registrationResendLimiter, resendRegistrationOtp);
+router.post("/register/verify-otp", registrationVerificationLimiter, verifyRegistrationOtp);
 router.post("/login", authLimiter, login);
 router.post("/forgot-password", recoveryLimiter, requestPasswordReset);
 router.post("/verify-reset-otp", recoveryLimiter, verifyPasswordResetOtp);

@@ -1,0 +1,177 @@
+[
+  {
+    "category": "University Identity",
+    "question": "What is the official name of the university?",
+    "answer": "PHINMA University of Pangasinan."
+  },
+  {
+    "category": "University Identity",
+    "question": "What is the university's abbreviation?",
+    "answer": "UPang."
+  },
+  {
+    "category": "University Identity",
+    "question": "What educational group manages the university?",
+    "answer": "PHINMA Education."
+  },
+  {
+    "category": "University Identity",
+    "question": "Where is the university located?",
+    "answer": "The university has campuses in Dagupan City and Urdaneta City, Pangasinan, Philippines."
+  },
+  {
+    "category": "University Identity",
+    "question": "When was the institution established?",
+    "answer": "The institution began in 1925 as Dagupan Institute."
+  },
+  {
+    "category": "University Identity",
+    "question": "When did PHINMA acquire the university?",
+    "answer": "PHINMA acquired the university in 2009."
+  },
+  {
+    "category": "University Identity",
+    "question": "What is the university's official website?",
+    "answer": "Visit https://up.phinma.edu.ph/."
+  },
+  {
+    "category": "University Identity",
+    "question": "What is the official general inquiry email?",
+    "answer": "Email info.up@phinmaed.com."
+  },
+  {
+    "category": "University Identity",
+    "question": "Does UPang have more than one campus?",
+    "answer": "Yes. UPang has Dagupan and Urdaneta campuses."
+  },
+  {
+    "category": "Campus Information",
+    "question": "What is the name of the main campus?",
+    "answer": "PHINMA University of Pangasinan — Dagupan Campus."
+  },
+  {
+    "category": "Campus Information",
+    "question": "Where is the Dagupan campus located?",
+    "answer": "Arellano Street, Downtown District, Dagupan City, Pangasinan 2400, Philippines."
+  },
+  {
+    "category": "Campus Information",
+    "question": "What is the Dagupan campus contact number?",
+    "answer": "Call +63 995-078-5660."
+  },
+  {
+    "category": "Campus Information",
+    "question": "What landline numbers are listed for Dagupan?",
+    "answer": "The listed landlines are (075) 522-5635 and (075) 522-2496."
+  },
+  {
+    "category": "Campus Information",
+    "question": "What is the Dagupan campus email address?",
+    "answer": "Email info.up@phinmaed.com."
+  },
+  {
+    "category": "Campus Information",
+    "question": "What is the official website for the Dagupan campus?",
+    "answer": "Visit https://up.phinma.edu.ph/."
+  },
+  {
+    "category": "Campus Information",
+    "question": "Where can someone ask general questions about the Dagupan campus?",
+    "answer": "Contact the university at info.up@phinmaed.com, call its listed telephone numbers, or use https://up.phinma.edu.ph/contact-us/."
+  },
+  {
+    "category": "Campus Information",
+    "question": "What is the name of the Urdaneta campus?",
+    "answer": "PHINMA UPang College Urdaneta, also referred to as the Urdaneta campus."
+  },
+  {
+    "category": "Campus Information",
+    "question": "Where is the Urdaneta campus located?",
+    "answer": "McArthur Highway, Urdaneta City, Pangasinan 2428, Philippines."
+  },
+  {
+    "category": "Campus Information",
+    "question": "What is the Urdaneta campus contact number?",
+    "answer": "Call +63 921-211-9138."
+  },
+  {
+    "category": "Campus Information",
+    "question": "What is the Urdaneta campus email address?",
+    "answer": "Email info.up@phinmaed.com."
+  },
+  {
+    "category": "Campus Information",
+    "question": "What is the official website for the Urdaneta campus?",
+    "answer": "Visit https://up.phinma.edu.ph/."
+  },
+  {
+    "category": "Campus Information",
+    "question": "How can someone contact the Urdaneta campus?",
+    "answer": "Call +63 921-211-9138, email info.up@phinmaed.com, or use https://up.phinma.edu.ph/contact-us/."
+  },
+  {
+    "category": "Office Hours",
+    "question": "What are the listed office hours for the Dagupan campus?",
+    "answer": "A third-party business listing shows Monday–Friday, 8:00 AM–5:00 PM, and Saturday, 8:00 AM–12:00 PM. These hours are indicative and have not been confirmed as official; contact the university before visiting."
+  },
+  {
+    "category": "Office Hours",
+    "question": "What are the listed office hours for the Urdaneta campus?",
+    "answer": "A third-party business listing shows Monday–Friday, 8:00 AM–5:00 PM. Weekend hours are not confirmed by that listing. Contact the campus before visiting."
+  },
+  {
+    "category": "Office Hours",
+    "question": "Is the Dagupan campus open on Sundays?",
+    "answer": "Sunday opening hours have not been verified. Contact the university before visiting."
+  },
+  {
+    "category": "Office Hours",
+    "question": "Is the Urdaneta campus open on Saturdays or Sundays?",
+    "answer": "Weekend operating hours have not been verified. Contact the campus before visiting."
+  },
+  {
+    "category": "Office Hours",
+    "question": "Are all university offices open during the same hours?",
+    "answer": "This has not been confirmed. The registrar, admissions, finance, and other offices may have different schedules. Contact the specific office before visiting."
+  },
+  {
+    "category": "Office Hours",
+    "question": "What should I do if I need to visit outside the listed hours?",
+    "answer": "Contact the campus in advance to confirm office availability and any appointment requirements."
+  },
+  {
+    "category": "Online Resources",
+    "question": "Where can I find official university information?",
+    "answer": "Visit https://up.phinma.edu.ph/."
+  },
+  {
+    "category": "Online Resources",
+    "question": "Where can I find contact information?",
+    "answer": "Visit https://up.phinma.edu.ph/contact-us/."
+  },
+  {
+    "category": "Online Resources",
+    "question": "Where can I find the university's history?",
+    "answer": "Visit https://up.phinma.edu.ph/about-us/."
+  },
+  {
+    "category": "Online Resources",
+    "question": "Where can I find college programs?",
+    "answer": "Visit https://up.phinma.edu.ph/college-programs/."
+  },
+  {
+    "category": "Online Resources",
+    "question": "Where can I find admissions information?",
+    "answer": "Visit https://up.phinma.edu.ph/admission/."
+  },
+  {
+    "category": "Online Resources",
+    "question": "Where can I find information about university management?",
+    "answer": "Visit https://up.phinma.edu.ph/management/."
+  },
+  {
+    "category": "Online Resources",
+    "question": "Where can I find official PHINMA Education information about UPang?",
+    "answer": "Visit https://www.phinma.edu.ph/schools-and-admission/."
+  }
+]

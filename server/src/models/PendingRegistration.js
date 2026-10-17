@@ -9,8 +9,7 @@ const pendingRegistrationSchema = new mongoose.Schema({
   otpExpiresAt: { type: Date, select: false },
   otpRequestedAt: { type: Date, select: false },
   otpAttempts: { type: Number, default: 0, select: false },
-  registrationTokenHash: { type: String, select: false },
-  registrationTokenExpiresAt: { type: Date, select: false },
+  resumeTokenHash: { type: String, select: false },
   expiresAt: { type: Date, required: true, index: { expires: 0 } }
 }, { timestamps: true });
 

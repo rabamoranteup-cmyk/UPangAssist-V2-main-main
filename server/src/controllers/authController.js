@@ -1,11 +1,8 @@
-﻿const crypto = require("crypto");
+const crypto = require("crypto");
 const argon2 = require("argon2");
 const User = require("../models/User");
 const PendingRegistration = require("../models/PendingRegistration");
-const {
-  normalizeEmail,
-  isAllowedSchoolEmail
-} = require("../utils/emailPolicy");
+const { normalizeEmail } = require("../utils/emailPolicy");
 const { createAccessToken } = require("../utils/jwt");
 const { sendRecoveryOtp, sendRegistrationOtp, describeRecoveryEmailError } = require("../utils/recoveryEmail");
 
@@ -16,7 +13,75 @@ const OTP_RESEND_WAIT_MS = 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
 const REGISTRATION_OTP_TTL_MS = 10 * 60 * 1000;
 const REGISTRATION_RESEND_WAIT_MS = 60 * 1000;
-const REGISTRATION_TOKEN_TTL_MS = 10 * 60 * 1000;
+const REGISTRATION_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+const REGISTRATION_COOKIE = "upang_registration_session";
+const UPANG_EMAIL_DOMAIN = "phinmaed.com";
+const UPANG_EMAIL_ACCESS_ERROR = "Access denied. Only official UPang PHINMA emails (*.up@phinmaed.com or @phinmaed.com) are allowed.";
+
+function isAllowedUpangEmail(value) {
+  // Callers pass only primitive strings; String() makes the value used for
+  // validation explicit while request-body objects and arrays are rejected.
+  const email = String(value ?? "").trim().toLowerCase();
+  // Require a nonempty username atom; `.up` may follow it for students.
+  // The complete match also rejects whitespace, extra @ signs, and other domains.
+  return /^(?:[a-z0-9_%+-]+(?:\.[a-z0-9_%+-]+)*)(?:\.up)?@phinmaed\.com$/.test(email);
+}
+
+function normalizeRequestEmail(body) {
+  // Never coerce objects or arrays into query values. The request middleware
+  // rejects them; this guard also keeps direct controller calls safe.
+  if (typeof body?.email !== "string") return "";
+  return normalizeEmail(String(body.email));
+}
+
+function registrationCookieOptions() {
+  return { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: REGISTRATION_SESSION_TTL_MS, path: "/api/auth/register" };
+}
+
+async function findPendingRegistration(req) {
+  const token = req.cookies?.[REGISTRATION_COOKIE];
+  if (typeof token !== "string" || token.length !== 64) return null;
+  return PendingRegistration.findOne({ resumeTokenHash: hashRecoveryValue(token), expiresAt: { $gt: new Date() } })
+    .select("+otpHash +otpExpiresAt +otpRequestedAt +otpAttempts +passwordHash");
+}
+
+async function getPendingRegistration(req, res) {
+  try {
+    const pending = await findPendingRegistration(req);
+    if (!pending) return res.status(404).json({ error: "Your verification session expired. Please register again." });
+    return res.status(200).json({ email: pending.email, resendAt: pending.otpRequestedAt ? pending.otpRequestedAt.getTime() + REGISTRATION_RESEND_WAIT_MS : Date.now(), expiresAt: pending.otpExpiresAt?.getTime() || null });
+  } catch (error) {
+    console.error("Unable to restore registration verification:", error.message);
+    return res.status(500).json({ error: "Unable to restore email verification" });
+  }
+}
+
+async function resendRegistrationOtp(req, res) {
+  try {
+    const pending = await findPendingRegistration(req);
+    if (!pending) return res.status(404).json({ error: "Your verification session expired. Please register again." });
+    const now = Date.now();
+    if (pending.otpRequestedAt && now - pending.otpRequestedAt.getTime() < REGISTRATION_RESEND_WAIT_MS) {
+      return res.status(429).json({ code: "REGISTRATION_OTP_RECENTLY_SENT", error: "Please wait before requesting another code.", resendAt: pending.otpRequestedAt.getTime() + REGISTRATION_RESEND_WAIT_MS });
+    }
+    const otp = crypto.randomInt(100000, 1000000).toString();
+    const otpHash = hashRecoveryValue(`${pending.email}:${otp}`);
+    await PendingRegistration.updateOne({ _id: pending._id, resumeTokenHash: hashRecoveryValue(req.cookies[REGISTRATION_COOKIE]) }, {
+      $set: { otpHash, otpExpiresAt: new Date(now + REGISTRATION_OTP_TTL_MS), otpRequestedAt: new Date(now), otpAttempts: 0, expiresAt: new Date(now + REGISTRATION_SESSION_TTL_MS) },
+    });
+    try { await sendRegistrationOtp(pending.email, otp); }
+    catch (mailError) {
+      await PendingRegistration.updateOne({ _id: pending._id, otpHash }, { $unset: { otpHash: 1, otpExpiresAt: 1 } });
+      const failure = describeRecoveryEmailError(mailError);
+      console.error(`Registration OTP delivery failed (${failure.code}): ${failure.message}`);
+      return res.status(503).json({ error: failure.message });
+    }
+    return res.status(200).json({ message: "A new verification code has been sent.", resendAt: now + REGISTRATION_RESEND_WAIT_MS });
+  } catch (error) {
+    console.error("Registration OTP resend failed:", error.message);
+    return res.status(500).json({ error: "Unable to resend verification code" });
+  }
+}
 
 
 async function getCurrentUser(req, res) {
@@ -37,8 +102,8 @@ async function findRecoveryUser(email) {
 }
 
 async function requestPasswordReset(req, res) {
-  const email = normalizeEmail(req.body?.email);
-  if (!isAllowedSchoolEmail(email)) return res.status(200).json({ message: RECOVERY_RESPONSE });
+  const email = normalizeRequestEmail(req.body);
+  if (!isAllowedUpangEmail(email)) return res.status(400).json({ error: UPANG_EMAIL_ACCESS_ERROR });
 
   try {
     const user = await findRecoveryUser(email);
@@ -76,9 +141,10 @@ async function requestPasswordReset(req, res) {
 }
 
 async function verifyPasswordResetOtp(req, res) {
-  const email = normalizeEmail(req.body?.email);
+  const email = normalizeRequestEmail(req.body);
   const otp = typeof req.body?.otp === "string" ? req.body.otp.trim() : "";
-  if (!isAllowedSchoolEmail(email) || !/^\d{6}$/.test(otp)) {
+  if (!isAllowedUpangEmail(email)) return res.status(400).json({ error: UPANG_EMAIL_ACCESS_ERROR });
+  if (!/^\d{6}$/.test(otp)) {
     return res.status(400).json({ error: "Enter a valid PHINMA email and six-digit code" });
   }
 
@@ -128,11 +194,12 @@ async function verifyPasswordResetOtp(req, res) {
 }
 
 async function resetPassword(req, res) {
-  const email = normalizeEmail(req.body?.email);
+  const email = normalizeRequestEmail(req.body);
   const resetToken = typeof req.body?.resetToken === "string" ? req.body.resetToken : "";
   const password = req.body?.password;
   const confirmPassword = req.body?.confirmPassword;
-  if (!isAllowedSchoolEmail(email) || resetToken.length !== 64) return res.status(400).json({ error: "Invalid or expired password reset session" });
+  if (!isAllowedUpangEmail(email)) return res.status(400).json({ error: UPANG_EMAIL_ACCESS_ERROR });
+  if (resetToken.length !== 64) return res.status(400).json({ error: "Invalid or expired password reset session" });
   if (typeof password !== "string" || password.length < 8 || password.length > 128) {
     return res.status(400).json({ error: "Password must contain between 8 and 128 characters" });
   }
@@ -189,15 +256,18 @@ function toSafeUser(user) {
     email: user.email,
     course: user.course,
     role: user.role,
-    status: user.status
+    status: user.status,
+    avatar: user.avatar || null
   };
 }
 
 function setAuthCookie(res, user) {
   const token = createAccessToken(user);
   const cookieName = process.env.COOKIE_NAME || "upang_access_token";
+  const payload = require("jsonwebtoken").decode(token);
 
   res.cookie(cookieName, token, getCookieOptions());
+  res.setHeader("X-Auth-Expires-At", String(payload.exp * 1000));
 }
 
 async function findUserByNormalizedEmail(email, select = "") {
@@ -220,11 +290,11 @@ async function findUserByNormalizedEmail(email, select = "") {
 
 function readRegistrationDetails(body) {
   const name = typeof body?.name === "string" ? body.name.trim() : "";
-  const email = normalizeEmail(body?.email);
+  const email = normalizeRequestEmail(body);
   const course = typeof body?.course === "string" ? body.course.trim() : "";
   const password = body?.password;
   const confirmPassword = body?.confirmPassword;
-  if (!isAllowedSchoolEmail(email)) return { error: { status: 401, message: "Invalid email or password" } };
+  if (!isAllowedUpangEmail(email)) return { error: { status: 400, message: UPANG_EMAIL_ACCESS_ERROR } };
   if (!name || !email || !course || !password || !confirmPassword) {
     return { error: { status: 400, message: "Name, email, course, password, and confirmation are required" } };
   }
@@ -233,6 +303,9 @@ function readRegistrationDetails(body) {
   if (course.length > 150) return { error: { status: 400, message: "Course must not exceed 150 characters" } };
   if (typeof password !== "string" || password.length < 8 || password.length > 128) {
     return { error: { status: 400, message: "Password must contain between 8 and 128 characters" } };
+  }
+  if (/\s/.test(password) || (typeof confirmPassword === "string" && /\s/.test(confirmPassword))) {
+    return { error: { status: 400, message: "Password must not contain spaces." } };
   }
   if (password !== confirmPassword) return { error: { status: 400, message: "Passwords do not match" } };
   return { details: { name, email, course, password } };
@@ -249,12 +322,17 @@ async function requestRegistrationOtp(req, res) {
     }
     const existingPending = await PendingRegistration.findOne({ email }).select("+otpRequestedAt");
     if (existingPending?.otpRequestedAt && Date.now() - existingPending.otpRequestedAt.getTime() < REGISTRATION_RESEND_WAIT_MS) {
-      return res.status(429).json({ error: "A verification code was sent recently. Please wait before requesting another." });
+      return res.status(429).json({
+        code: "REGISTRATION_OTP_RECENTLY_SENT",
+        error: "A verification code was sent recently. Enter it below.",
+        verificationRequired: true
+      });
     }
 
     const now = Date.now();
     const otp = crypto.randomInt(100000, 1000000).toString();
     const otpHash = hashRecoveryValue(`${email}:${otp}`);
+    const resumeToken = crypto.randomBytes(32).toString("hex");
     const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
     const pending = await PendingRegistration.findOneAndUpdate({ email }, {
       $set: {
@@ -266,9 +344,9 @@ async function requestRegistrationOtp(req, res) {
         otpExpiresAt: new Date(now + REGISTRATION_OTP_TTL_MS),
         otpRequestedAt: new Date(now),
         otpAttempts: 0,
-        expiresAt: new Date(now + REGISTRATION_OTP_TTL_MS)
+        resumeTokenHash: hashRecoveryValue(resumeToken),
+        expiresAt: new Date(now + REGISTRATION_SESSION_TTL_MS)
       },
-      $unset: { registrationTokenHash: 1, registrationTokenExpiresAt: 1 }
     }, { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true });
 
     try {
@@ -279,7 +357,8 @@ async function requestRegistrationOtp(req, res) {
       console.error(`Registration OTP delivery failed (${mailFailure.code}): ${mailFailure.message}`);
       return res.status(503).json({ error: mailFailure.message });
     }
-    return res.status(200).json({ message: "A verification code has been sent to your PHINMA email." });
+    res.cookie(REGISTRATION_COOKIE, resumeToken, registrationCookieOptions());
+    return res.status(200).json({ message: "A verification code has been sent to your PHINMA email.", verificationRequired: true });
   } catch (error) {
     if (error.code === 11000) return res.status(409).json({ error: "An account with this email already exists" });
     console.error("Registration OTP request failed:", error.message);
@@ -288,16 +367,15 @@ async function requestRegistrationOtp(req, res) {
 }
 
 async function verifyRegistrationOtp(req, res) {
-  const email = normalizeEmail(req.body?.email);
   const otp = typeof req.body?.otp === "string" ? req.body.otp.trim() : "";
-  if (!isAllowedSchoolEmail(email) || !/^\d{6}$/.test(otp)) {
-    return res.status(400).json({ error: "Enter a valid PHINMA email and six-digit code" });
+  if (!/^\d{6}$/.test(otp)) {
+    return res.status(400).json({ error: "Enter the six-digit verification code" });
   }
 
   try {
-    const pending = await PendingRegistration.findOne({ email }).select("+otpHash +otpExpiresAt +otpAttempts");
+    const pending = await findPendingRegistration(req);
     if (!pending || !pending.otpHash || !pending.otpExpiresAt || pending.otpExpiresAt.getTime() <= Date.now()) {
-      return res.status(400).json({ error: "The code is invalid or expired. Request a new code and try again." });
+      return res.status(400).json({ error: "The code has expired. Request a new code and try again." });
     }
     if ((pending.otpAttempts || 0) >= OTP_MAX_ATTEMPTS) {
       await PendingRegistration.updateOne({ _id: pending._id, otpHash: pending.otpHash }, {
@@ -307,7 +385,7 @@ async function verifyRegistrationOtp(req, res) {
     }
 
     const expected = Buffer.from(pending.otpHash, "hex");
-    const received = Buffer.from(hashRecoveryValue(`${email}:${otp}`), "hex");
+    const received = Buffer.from(hashRecoveryValue(`${pending.email}:${otp}`), "hex");
     if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) {
       const attempt = (pending.otpAttempts || 0) + 1;
       const update = attempt >= OTP_MAX_ATTEMPTS
@@ -319,80 +397,49 @@ async function verifyRegistrationOtp(req, res) {
         : "The code is invalid or expired. Check the code and try again." });
     }
 
-    const registrationToken = crypto.randomBytes(32).toString("hex");
-    const tokenExpiry = new Date(Date.now() + REGISTRATION_TOKEN_TTL_MS);
-    const verified = await PendingRegistration.updateOne({
+    if (await findUserByNormalizedEmail(pending.email)) {
+      await PendingRegistration.deleteOne({ _id: pending._id });
+      res.clearCookie(REGISTRATION_COOKIE, { ...registrationCookieOptions(), maxAge: undefined });
+      return res.status(409).json({ error: "An account with this email already exists" });
+    }
+    const emailVerifiedAt = new Date();
+    const created = await PendingRegistration.updateOne({
       _id: pending._id,
       otpHash: pending.otpHash,
-      otpExpiresAt: { $gt: new Date() }
+      otpExpiresAt: { $gt: new Date() },
+      resumeTokenHash: hashRecoveryValue(req.cookies[REGISTRATION_COOKIE])
     }, {
-      $set: {
-        registrationTokenHash: hashRecoveryValue(registrationToken),
-        registrationTokenExpiresAt: tokenExpiry,
-        expiresAt: tokenExpiry,
-        otpAttempts: 0
-      },
       $unset: { otpHash: 1, otpExpiresAt: 1 }
     });
-    if (!verified.matchedCount) return res.status(400).json({ error: "The code is invalid or expired. Request a new code and try again." });
-    return res.status(200).json({ registrationToken });
+    if (!created.matchedCount) return res.status(400).json({ error: "The code has expired. Request a new code and try again." });
+    const user = await User.create({ name: pending.name, email: pending.email, course: pending.course, passwordHash: pending.passwordHash, role: "student", status: "active", emailVerifiedAt, lastLoginAt: null });
+    await PendingRegistration.deleteOne({ _id: pending._id, resumeTokenHash: hashRecoveryValue(req.cookies[REGISTRATION_COOKIE]) });
+    res.clearCookie(REGISTRATION_COOKIE, { ...registrationCookieOptions(), maxAge: undefined });
+    return res.status(200).json({
+      email: user.email,
+      verified: true,
+      accountCreated: true,
+      message: "Account verified successfully! You can now log in."
+    });
   } catch (error) {
+    if (error.code === 11000) return res.status(409).json({ error: "An account with this email already exists" });
     console.error("Registration OTP verification failed:", error.message);
     return res.status(500).json({ error: "Unable to verify email address" });
   }
 }
 
-async function register(req, res) {
-  const email = normalizeEmail(req.body?.email);
-  const registrationToken = typeof req.body?.registrationToken === "string" ? req.body.registrationToken : "";
-  if (!isAllowedSchoolEmail(email) || registrationToken.length !== 64) {
-    return res.status(400).json({ error: "Verify your email before creating an account" });
-  }
-
-  try {
-    const pending = await PendingRegistration.findOne({ email }).select("+passwordHash +registrationTokenHash +registrationTokenExpiresAt");
-    if (!pending || !pending.registrationTokenHash || !pending.registrationTokenExpiresAt || pending.registrationTokenExpiresAt.getTime() <= Date.now()) {
-      return res.status(400).json({ error: "Email verification expired. Please request a new code." });
-    }
-    const expected = Buffer.from(pending.registrationTokenHash, "hex");
-    const received = Buffer.from(hashRecoveryValue(registrationToken), "hex");
-    if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) {
-      return res.status(400).json({ error: "Invalid email verification session" });
-    }
-    if (await findUserByNormalizedEmail(email)) {
-      await PendingRegistration.deleteOne({ _id: pending._id });
-      return res.status(409).json({ error: "An account with this email already exists" });
-    }
-    const user = await User.create({
-      name: pending.name,
-      email,
-      course: pending.course,
-      passwordHash: pending.passwordHash,
-      role: "student",
-      status: "active",
-      lastLoginAt: new Date()
-    });
-    await PendingRegistration.deleteOne({ _id: pending._id, registrationTokenHash: pending.registrationTokenHash });
-    setAuthCookie(res, user);
-    return res.status(201).json({ user: toSafeUser(user) });
-  } catch (error) {
-    if (error.code === 11000) {
-      return res.status(409).json({ error: "An account with this email already exists" });
-    }
-    console.error("Registration error:", error.message);
-    return res.status(500).json({ error: "Unable to create account" });
-  }
-}
-
 async function login(req, res) {
   try {
-    const email = normalizeEmail(req.body?.email);
-    if (!isAllowedSchoolEmail(email)) {
-      return res.status(401).json({ error: "Invalid email or password" });
+    const email = normalizeRequestEmail(req.body);
+    if (!isAllowedUpangEmail(email)) {
+      return res.status(400).json({ error: UPANG_EMAIL_ACCESS_ERROR });
     }
     const password = req.body?.password;
     if (!email || typeof password !== "string" || !password) {
       return res.status(400).json({ error: "Email and password are required" });
+    }
+    if (/\s/.test(password)) {
+      return res.status(400).json({ error: "Password must not contain spaces." });
     }
 
     const user = await User.findOne({ email }).select("+passwordHash _id name email course role status");
@@ -432,16 +479,81 @@ function logout(req, res) {
   return res.status(204).send();
 }
 
+function normalizeGoogleSetting(value) {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (trimmed.length >= 2 &&
+      ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+       (trimmed.startsWith("'") && trimmed.endsWith("'")))) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
 function getGoogleConfig() {
   return {
-    clientId: process.env.GOOGLE_CLIENT_ID,
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    redirectUri: process.env.GOOGLE_REDIRECT_URI
+    clientId: normalizeGoogleSetting(process.env.GOOGLE_CLIENT_ID),
+    clientSecret: normalizeGoogleSetting(process.env.GOOGLE_CLIENT_SECRET),
+    redirectUri: normalizeGoogleSetting(process.env.GOOGLE_REDIRECT_URI)
   };
 }
 
+function getGoogleConfigurationIssue(config = getGoogleConfig()) {
+  if (!config.clientId?.trim()) return "GOOGLE_CLIENT_ID is missing";
+  if (/^(your[-_ ]|placeholder|replace[-_ ]|<)/i.test(config.clientId.trim())) return "GOOGLE_CLIENT_ID is a placeholder";
+  if (!config.clientSecret?.trim()) return "GOOGLE_CLIENT_SECRET is missing";
+  if (/^(your[-_ ]|placeholder|replace[-_ ]|<)/i.test(config.clientSecret.trim())) return "GOOGLE_CLIENT_SECRET is a placeholder";
+
+  let redirect;
+  try {
+    redirect = new URL(config.redirectUri);
+  } catch {
+    return "GOOGLE_REDIRECT_URI is missing or invalid";
+  }
+  if (!/^https?:$/.test(redirect.protocol) || redirect.username || redirect.password ||
+      redirect.search || redirect.hash || redirect.pathname !== "/api/auth/google/callback") {
+    return "GOOGLE_REDIRECT_URI must point to /api/auth/google/callback";
+  }
+  if (process.env.NODE_ENV === "production" && redirect.protocol !== "https:") {
+    return "GOOGLE_REDIRECT_URI must use HTTPS in production";
+  }
+
+  try {
+    const frontend = new URL(process.env.FRONTEND_ORIGIN || "http://localhost:5173");
+    if (!/^https?:$/.test(frontend.protocol) || frontend.username || frontend.password || frontend.search || frontend.hash || frontend.pathname !== "/") {
+      return "FRONTEND_ORIGIN must be a valid origin without a path, query, or fragment";
+    }
+    if (process.env.NODE_ENV === "production" && frontend.protocol !== "https:") {
+      return "FRONTEND_ORIGIN must use HTTPS in production";
+    }
+  } catch {
+    return "FRONTEND_ORIGIN is invalid";
+  }
+
+  return null;
+}
+
+function reportGoogleConfigurationIssue(issue) {
+  // Log only the setting name and validation result; never emit credential values.
+  console.error("Google OAuth configuration problem:", issue);
+}
+
+function googleConfigurationErrorCode(issue) {
+  if (/^GOOGLE_CLIENT_(ID|SECRET)/.test(issue)) return "google_credentials_invalid";
+  if (/^GOOGLE_REDIRECT_URI/.test(issue)) return "google_redirect_mismatch";
+  return "google_configuration_error";
+}
+
 function googleFailure(res, code) {
-  const frontendOrigin = process.env.FRONTEND_ORIGIN || "http://localhost:5173";
+  let frontendOrigin = "http://localhost:5173";
+  try {
+    const configuredOrigin = new URL(process.env.FRONTEND_ORIGIN || frontendOrigin);
+    if (/^https?:$/.test(configuredOrigin.protocol) && !configuredOrigin.username && !configuredOrigin.password) {
+      frontendOrigin = configuredOrigin.origin;
+    }
+  } catch {
+    // Keep the failure redirect usable when FRONTEND_ORIGIN itself is malformed.
+  }
   const destination = new URL("/", frontendOrigin);
   destination.searchParams.set("oauth_error", code);
   return res.redirect(destination.toString());
@@ -449,8 +561,10 @@ function googleFailure(res, code) {
 
 function startGoogleLogin(req, res) {
   const { clientId, clientSecret, redirectUri } = getGoogleConfig();
-  if (!clientId || !clientSecret || !redirectUri) {
-    return googleFailure(res, "google_not_configured");
+  const configIssue = getGoogleConfigurationIssue({ clientId, clientSecret, redirectUri });
+  if (configIssue) {
+    reportGoogleConfigurationIssue(configIssue);
+    return googleFailure(res, googleConfigurationErrorCode(configIssue));
   }
 
   const state = crypto.randomBytes(32).toString("hex");
@@ -494,12 +608,16 @@ async function googleCallback(req, res) {
     return googleFailure(res, "google_cancelled");
   }
 
+  let failureCode = "google_failed";
   try {
     const { clientId, clientSecret, redirectUri } = getGoogleConfig();
-    if (!clientId || !clientSecret || !redirectUri) {
-      return googleFailure(res, "google_not_configured");
+    const configIssue = getGoogleConfigurationIssue({ clientId, clientSecret, redirectUri });
+    if (configIssue) {
+      reportGoogleConfigurationIssue(configIssue);
+      return googleFailure(res, googleConfigurationErrorCode(configIssue));
     }
 
+    failureCode = "google_code_exchange_failed";
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -511,52 +629,90 @@ async function googleCallback(req, res) {
         grant_type: "authorization_code"
       })
     });
-    if (!tokenResponse.ok) return googleFailure(res, "google_failed");
+    if (!tokenResponse.ok) {
+      const tokenError = await tokenResponse.json().catch(() => ({}));
+      if (tokenError.error === "invalid_client") {
+        console.error("Google OAuth token exchange rejected the client; verify GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.");
+        return googleFailure(res, "google_credentials_invalid");
+      }
+      if (tokenError.error === "invalid_grant") {
+        console.error("Google OAuth authorization code was rejected; verify GOOGLE_REDIRECT_URI matches the Google Cloud authorized redirect URI exactly.");
+        return googleFailure(res, "google_redirect_mismatch");
+      }
+      return googleFailure(res, failureCode);
+    }
 
     const tokens = await tokenResponse.json();
-    if (!tokens.access_token) return googleFailure(res, "google_failed");
+    if (!tokens.access_token) return googleFailure(res, failureCode);
 
-    if (!tokens.id_token) return googleFailure(res, "google_failed");
+    if (!tokens.id_token) return googleFailure(res, failureCode);
+    failureCode = "google_identity_failed";
     const tokenInfoUrl = new URL("https://oauth2.googleapis.com/tokeninfo");
     tokenInfoUrl.searchParams.set("id_token", tokens.id_token);
     const identityResponse = await fetch(tokenInfoUrl);
-    if (!identityResponse.ok) return googleFailure(res, "google_failed");
+    if (!identityResponse.ok) return googleFailure(res, failureCode);
 
     const identity = await identityResponse.json();
-    const email = normalizeEmail(identity.email);
-    const emailDomain = email.split("@").at(-1);
+    const email = typeof identity.email === "string" ? normalizeEmail(String(identity.email)) : "";
+    const googleId = typeof identity.sub === "string" ? String(identity.sub) : undefined;
     if (identity.aud !== clientId ||
         !["accounts.google.com", "https://accounts.google.com"].includes(identity.iss) ||
-        identity.email_verified !== "true" || emailDomain !== "phinmaed.com" || !isAllowedSchoolEmail(email)) {
+        ![true, "true"].includes(identity.email_verified) ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return googleFailure(res, "google_unverified");
     }
+    if (!isAllowedUpangEmail(email)) {
+      return res.status(400).json({ error: UPANG_EMAIL_ACCESS_ERROR });
+    }
 
-    const user = await findUserByNormalizedEmail(email);
-    console.info("Google OAuth registered-user lookup", {
-      googleEmail: identity.email,
-      normalizedEmail: email,
-      database: User.db.name || "not-connected",
-      collection: User.collection.name,
-      matched: Boolean(user)
-    });
-    if (!user || user.status !== "active") {
+    failureCode = "google_database_unavailable";
+    let user = await findUserByNormalizedEmail(email);
+    if (!user) {
+      const name = typeof identity.name === "string" && identity.name.trim()
+        ? identity.name.trim().slice(0, 100)
+        : email.split("@")[0];
+      try {
+        user = await User.create({
+          name,
+          username: name,
+          email,
+          googleId,
+          authProvider: "google",
+          role: "student",
+          avatar: typeof identity.picture === "string" ? identity.picture.slice(0, 2048) : undefined,
+          emailVerifiedAt: new Date()
+        });
+      } catch (createError) {
+        // Concurrent first sign-ins can race on the unique email/googleId indexes.
+        if (createError.code !== 11000) throw createError;
+        user = await findUserByNormalizedEmail(email);
+        if (!user) throw createError;
+      }
+    }
+    if (user.status !== "active") {
       return googleFailure(res, "google_account_unregistered");
     }
 
+    failureCode = "google_session_failed";
     user.lastLoginAt = new Date();
     await user.save();
     setAuthCookie(res, user);
     const frontendOrigin = process.env.FRONTEND_ORIGIN || "http://localhost:5173";
     return res.redirect(new URL("/", frontendOrigin).toString());
   } catch (error) {
-    console.error("Google OAuth error:", error.name);
-    return googleFailure(res, "google_failed");
+    console.error("Google OAuth failed", {
+      stage: failureCode,
+      error: error.name,
+      cause: error.cause?.code || undefined
+    });
+    return googleFailure(res, failureCode);
   }
 }
 
 module.exports = {
-  register,
   requestRegistrationOtp,
+  getPendingRegistration,
+  resendRegistrationOtp,
   verifyRegistrationOtp,
   login,
   requestPasswordReset,
