@@ -304,6 +304,13 @@ function readRegistrationDetails(body) {
   if (typeof password !== "string" || password.length < 8 || password.length > 128) {
     return { error: { status: 400, message: "Password must contain between 8 and 128 characters" } };
   }
+  const specialCharCount = (password.match(/[^a-zA-Z0-9]/g) || []).length;
+  if (!/(?=.*[a-zA-Z])(?=.*\d)/.test(password)) {
+    return { error: { status: 400, message: "Password must contain a mix of letters and numbers." } };
+  }
+  if (specialCharCount > 1) {
+    return { error: { status: 400, message: "Password can only contain up to one special character." } };
+  }
   if (/\s/.test(password) || (typeof confirmPassword === "string" && /\s/.test(confirmPassword))) {
     return { error: { status: 400, message: "Password must not contain spaces." } };
   }

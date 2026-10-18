@@ -1,11 +1,5 @@
-const path = require("path");
-<<<<<<< HEAD
-require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
-require('dotenv').config({ path: path.resolve(__dirname, '.env') });
-
-=======
-require("dotenv").config({ path: path.join(__dirname, "../.env") });
->>>>>>> e2e890c89a45da7a3b545bce5c916fbaded2013c
+﻿const path = require("path");
+require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 
 const express = require("express");
 const mongoose = require("mongoose");
@@ -23,7 +17,6 @@ const conversationRoutes = require("./routes/conversationRoutes");
 const Conversation = require("./models/Conversation");
 const ConversationVersion = require("./models/ConversationVersion");
 const { findSemanticReferences } = require("./semanticSearch");
-<<<<<<< HEAD
 const {
   getKnowledgeBase,
   refreshKnowledgeBase,
@@ -31,11 +24,8 @@ const {
   backfillKnowledgeSearchData
 } = require("./services/knowledgeBase");
 const { getKeywordRelevance } = require("./services/knowledgeIndex");
-=======
-const { generateAnswerFromKnowledge, NO_SUPPORTED_ANSWER } = require("./services/answerGeneration");
-const { getKnowledgeBase, refreshKnowledgeBase, initializeKnowledgeBase } = require("./services/knowledgeBase");
->>>>>>> e2e890c89a45da7a3b545bce5c916fbaded2013c
 const knowledgeRoutes = require("./routes/knowledgeRoutes");
+const { sanitizeChatMessage } = require("./utils/sanitizeChatMessage");
 
 const app = express();
 
@@ -86,36 +76,11 @@ const MIN_COMBINED_RELEVANCE = 0.4;
 const CAMPUS_SPECIFIC_TERMS = /\b(upang|phinma|university of pangasinan|enroll(?:ment)?|enrolment|registration|admission|registrar|tuition|fees?|scholarships?|financial aid|hawak kamay|academic calendar|class schedule|office|department|course offerings?|student id|uniform|campus policy|school policy|school requirements|clearance|graduation|curriculum|school year|student services|library|faculty)\b/i;
 const ANSWER_FALLBACK = "I couldn't generate a response just now. Please try again.";
 
-<<<<<<< HEAD
 function findKeywordReferences(question) {
   return getKnowledgeBase().map((reference) => ({
     reference,
     keywordScore: getKeywordRelevance(question, reference)
   }));
-=======
-const searchWordAliases = {
-  wear: ["dress", "uniform"],
-  wearing: ["dress", "uniform"],
-  clothes: ["dress", "uniform"],
-  clothing: ["dress", "uniform"],
-  aid: ["scholarship", "financial"],
-  hk: ["hawak", "kamay", "scholarship"],
-  enroll: ["enrollment", "registration", "admission"],
-  enrollment: ["enroll", "registration", "admission"],
-  register: ["registration", "enroll", "enrollment"],
-  registration: ["register", "enroll", "enrollment"]
-};
-
-function getSearchWords(value) {
-  const words = (value || "")
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .match(/[a-z0-9]{2,}/g)
-    ?.filter((word) => !ignoredSearchWords.has(word)) || [];
-
-  return words.flatMap((word) => [word, ...(searchWordAliases[word] || [])]);
->>>>>>> e2e890c89a45da7a3b545bce5c916fbaded2013c
 }
 
 async function retrieveKnowledgeReferences(question, history) {
@@ -179,18 +144,19 @@ function createConversation(owner, question) {
 }
 
 async function saveChatTurn(conversation, question, answer, references = []) {
+  const safeQuestion = sanitizeChatMessage(question);
+  const safeAnswer = sanitizeChatMessage(answer);
   conversation.messages.push(
-    { role: "user", content: question },
+    { role: "user", content: safeQuestion },
     {
       role: "assistant",
-      content: answer,
+      content: safeAnswer,
       references: references.map(({ category, question: topic }) => ({ category, question: topic }))
     }
   );
   await conversation.save();
 }
 
-<<<<<<< HEAD
 const CONVERSATION_MEMORY_MESSAGES = 10;
 
 function isFollowUpQuestion(question) {
@@ -282,10 +248,8 @@ async function generateAnswer(question, references, history = [], campusKnowledg
   return { answer: ANSWER_FALLBACK, provider: "response_fallback" };
 }
 
-=======
->>>>>>> e2e890c89a45da7a3b545bce5c916fbaded2013c
 app.post("/api/chat", requireAuth, async (req, res) => {
-  const question = typeof req.body?.question === "string" ? req.body.question.trim() : "";
+  const question = sanitizeChatMessage(req.body?.message ?? req.body?.question);
 
   if (!question || question.length > 12000) {
     return res.status(400).json({ error: "question is required and must be at most 12000 characters" });
@@ -306,7 +270,6 @@ app.post("/api/chat", requireAuth, async (req, res) => {
     return res.status(503).json({ error: "Knowledge database unavailable" });
   }
 
-<<<<<<< HEAD
   const { references, bestScore } = await retrieveKnowledgeReferences(question, history);
   const campusKnowledgeMissing = needsVerifiedCampusKnowledge(question) &&
     (!references.length || bestScore < MIN_COMBINED_RELEVANCE);
@@ -314,37 +277,8 @@ app.post("/api/chat", requireAuth, async (req, res) => {
 
   try {
     if (!conversation) conversation = await createConversation(req.user._id, question);
-=======
-  let references = findRelevantReferences(question);
-  try {
-    const semanticReferences = await findSemanticReferences(question, getKnowledgeBase());
-    references = [...new Map(
-      [...references, ...semanticReferences].map((reference) => [
-        `${reference.category}\u0000${reference.question}`,
-        reference
-      ])
-    ).values()].slice(0, 5);
-  } catch (error) {
-    console.warn("Semantic search unavailable; using keyword search:", error.message);
-  }
-
-  let answer;
-  try {
-    answer = await generateAnswerFromKnowledge(question, references);
-  } catch (error) {
-    console.error("Answer generation failed:", error.message);
-    return res.status(503).json({ error: "Unable to generate an answer" });
-  }
-  if (references.length > 0 && answer === NO_SUPPORTED_ANSWER) {
-    return res.status(204).end();
-  }
-
-  let conversation;
-  try {
-    conversation = await getOrCreateConversation(req, question);
->>>>>>> e2e890c89a45da7a3b545bce5c916fbaded2013c
     await saveChatTurn(conversation, question, answer, references);
-    return res.json({ text: answer, provider, conversationId: conversation._id });
+    return res.json({ text: sanitizeChatMessage(answer), provider, conversationId: conversation._id });
   } catch (error) {
     return res.status(error.status || 500).json({ error: error.status ? error.message : "Unable to save conversation" });
   }
@@ -353,7 +287,7 @@ app.post("/api/chat", requireAuth, async (req, res) => {
 app.post("/api/conversations/:id/edit", requireAuth, async (req, res) => {
   const { id } = req.params;
   const messageId = req.body?.messageId;
-  const editedContent = typeof req.body?.content === "string" ? req.body.content.trim() : "";
+  const editedContent = sanitizeChatMessage(req.body?.content);
   if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(messageId)) {
     return res.status(400).json({ error: "Invalid conversation or message ID" });
   }
@@ -374,36 +308,10 @@ app.post("/api/conversations/:id/edit", requireAuth, async (req, res) => {
 
     const history = conversation.messages.slice(0, messageIndex);
     await refreshKnowledgeBase();
-<<<<<<< HEAD
     const { references, bestScore } = await retrieveKnowledgeReferences(editedContent, history);
     const campusKnowledgeMissing = needsVerifiedCampusKnowledge(editedContent) &&
       (!references.length || bestScore < MIN_COMBINED_RELEVANCE);
     const { answer } = await generateAnswer(editedContent, references, history, campusKnowledgeMissing);
-=======
-    let references = findRelevantReferences(editedContent);
-    try {
-      const semanticReferences = await findSemanticReferences(editedContent, getKnowledgeBase());
-      references = [...new Map(
-        [...references, ...semanticReferences].map((reference) => [
-          `${reference.category}\u0000${reference.question}`,
-          reference
-        ])
-      ).values()].slice(0, 5);
-    } catch (error) {
-      console.warn("Semantic search unavailable during message edit:", error.message);
-    }
-
-    let answer;
-    try {
-      answer = await generateAnswerFromKnowledge(editedContent, references);
-    } catch (error) {
-      console.error("Answer regeneration failed:", error.message);
-      return res.status(503).json({ error: "Unable to generate an answer" });
-    }
-    if (references.length > 0 && answer === NO_SUPPORTED_ANSWER) {
-      return res.status(204).end();
-    }
->>>>>>> e2e890c89a45da7a3b545bce5c916fbaded2013c
 
     const priorMessages = conversation.messages.map((message) => message.toObject({ depopulate: true }));
     const previousVersionCount = await ConversationVersion.countDocuments({ conversation: conversation._id, owner: req.user._id });
@@ -418,7 +326,7 @@ app.post("/api/conversations/:id/edit", requireAuth, async (req, res) => {
     try {
       conversation.messages.splice(messageIndex + 1);
       conversation.messages[messageIndex].content = editedContent;
-      conversation.messages.push({ role: "assistant", content: answer, references });
+      conversation.messages.push({ role: "assistant", content: sanitizeChatMessage(answer), references });
       if (messageIndex === 0) conversation.title = editedContent.slice(0, 120);
       await conversation.save();
     } catch (error) {
@@ -429,7 +337,7 @@ app.post("/api/conversations/:id/edit", requireAuth, async (req, res) => {
     return res.json({
       id: conversation._id,
       title: conversation.title,
-      messages: conversation.messages,
+      messages: conversation.messages.map((message) => ({ ...message.toObject(), content: sanitizeChatMessage(message.content) })),
       versionIndex: 0,
       versionCount: previousVersionCount + 2,
       createdVersion: previousVersionCount + 1

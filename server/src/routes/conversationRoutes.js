@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const Conversation = require("../models/Conversation");
 const ConversationVersion = require("../models/ConversationVersion");
 const { requireAuth } = require("../middlewares/authMiddleware");
+const { sanitizeChatMessage } = require("../utils/sanitizeChatMessage");
 
 const router = express.Router();
 router.use(requireAuth);
@@ -65,7 +66,10 @@ router.get("/:id", async (req, res) => {
       title: conversation.title,
       createdAt: conversation.createdAt,
       updatedAt: conversation.updatedAt,
-      messages,
+      messages: messages.map((message) => ({
+        ...message,
+        content: sanitizeChatMessage(message.content)
+      })),
       versionIndex: requestedVersion,
       versionCount: versions.length + 1,
       versions: versions.map(({ versionNumber, createdAt, editedMessageId }) => ({ versionNumber, createdAt, editedMessageId: editedMessageId.toString() }))

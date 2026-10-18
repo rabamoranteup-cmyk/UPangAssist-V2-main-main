@@ -178,7 +178,7 @@ export default function App() {
     const userMessage = {
       id: getNextId('user_msg'),
       sender: 'user',
-      text: trimmed,
+      text: escapeHtml(trimmed),
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     }
 
@@ -227,7 +227,7 @@ export default function App() {
           {
             id: assistantMsgId,
             sender: 'assistant',
-            text: data.text,
+            text: escapeHtml(data.text),
             followUps: [],
             timestamp: assistantTimestamp,
           },
@@ -260,7 +260,7 @@ export default function App() {
 
           setMessages((prev) =>
             prev.map((msg) =>
-              msg.id === assistantMsgId ? { ...msg, text: accumulatedText } : msg
+              msg.id === assistantMsgId ? { ...msg, text: escapeHtml(accumulatedText) } : msg
             )
           )
         }
@@ -275,7 +275,7 @@ export default function App() {
         setMessages(conversation.messages.map((message) => ({
           id: message._id,
           sender: message.role,
-          text: message.content,
+          text: escapeHtml(message.content),
           followUps: [],
           timestamp: new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         })))
@@ -318,7 +318,7 @@ export default function App() {
         setMessages(conversation.messages.map((message) => ({
           id: message._id,
           sender: message.role,
-          text: message.content,
+          text: escapeHtml(message.content),
           followUps: [],
           timestamp: new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         })))
@@ -382,7 +382,7 @@ export default function App() {
       if (editedIndex < 0) return items
       return [
         ...items.slice(0, editedIndex),
-        { ...items[editedIndex], text: content },
+        { ...items[editedIndex], text: escapeHtml(content) },
       ]
     })
     setIsTyping(true)
@@ -400,7 +400,7 @@ export default function App() {
       setMessages(conversation.messages.map((savedMessage) => ({
         id: savedMessage._id,
         sender: savedMessage.role,
-        text: savedMessage.content,
+        text: escapeHtml(savedMessage.content),
         followUps: [],
         timestamp: new Date(savedMessage.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       })))
@@ -780,15 +780,8 @@ export default function App() {
                             <button type="submit" disabled={!editedMessageDraft.trim() || isTyping}>Save and regenerate</button>
                           </div>
                         </form>
-                      ) : msg.sender === 'assistant' ? (
-                        <div
-                          className="formatted-content"
-                          dangerouslySetInnerHTML={{
-                            __html: formatMarkdown(msg.text),
-                          }}
-                        />
                       ) : (
-                        <p>{msg.text}</p>
+                        <p>{decodeEscapedHtml(msg.text)}</p>
                       )}
                     </div>
 
@@ -799,7 +792,7 @@ export default function App() {
                           className="message-icon-button"
                           title="Edit message"
                           aria-label="Edit message"
-                          onClick={() => { setEditedMessageDraft(msg.text); setEditingMessageId(msg.id) }}
+                          onClick={() => { setEditedMessageDraft(decodeEscapedHtml(msg.text)); setEditingMessageId(msg.id) }}
                           disabled={isTyping}
                         >
                           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg>
@@ -937,56 +930,66 @@ export default function App() {
   )
 }
 
-// Markdown formatter for clean assistant text display
-function formatMarkdown(text) {
-  if (!text) return ''
-
-  let formatted = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-
-  formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-  formatted = formatted.replace(/\*(.*?)\*/g, '<em>$1</em>')
-
-  const lines = formatted.split('\n')
-  let inList = false
-  let result = []
-
-  for (let line of lines) {
-    const trimmed = line.trim()
-    if (trimmed.startsWith('â€¢ ') || trimmed.startsWith('- ')) {
-      if (!inList) {
-        result.push('<ul class="chat-md-list">')
-        inList = true
-      }
-      result.push(`<li>${trimmed.substring(2)}</li>`)
-    } else {
-      if (inList) {
-        result.push('</ul>')
-        inList = false
-      }
-      if (trimmed === '') {
-        result.push('<div class="chat-md-gap"></div>')
-      } else {
-        result.push(`<p class="chat-md-p">${line}</p>`)
-      }
-    }
-  }
-
-  if (inList) {
-    result.push('</ul>')
-  }
-
-  return result.join('')
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[character])
 }
 
+function decodeEscapedHtml(value) {
+  return String(value ?? '').replace(/&(?:amp|lt|gt|quot|#39);/g, (entity) => ({
+    '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'",
+  })[entity])
+}
 function LoginPage({ onLogin, onSignUp, onForgotPassword, successMessage = '' }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [failedAttempts, setFailedAttempts] = useState(0)
+  const [lockoutCount, setLockoutCount] = useState(0)
+  const [timeLeft, setTimeLeft] = useState(0)
+  const [lockoutUntil, setLockoutUntil] = useState(0)
   const [showPassword, setShowPassword] = useState(false)
+  const isLocked = timeLeft > 0
+
+  useEffect(() => {
+    const savedUntil = Number(window.localStorage.getItem('upangLoginLockoutUntil'))
+    const savedLevel = Number(window.localStorage.getItem('upangLoginLockoutLevel')) || 0
+    setLockoutCount(savedLevel)
+
+    if (Number.isFinite(savedUntil) && savedUntil > Date.now()) {
+      const remaining = Math.ceil((savedUntil - Date.now()) / 1000)
+      setLockoutUntil(savedUntil)
+      setTimeLeft(remaining)
+      setError(savedLevel <= 1
+        ? 'Too many failed login attempts. Please wait 30 seconds.'
+        : 'Too many failed login attempts. Please wait 1 minute and 30 seconds.')
+    } else {
+      window.localStorage.removeItem('upangLoginLockoutUntil')
+      setLockoutUntil(0)
+      setTimeLeft(0)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!isLocked || !lockoutUntil) return undefined
+    const updateCountdown = () => {
+      const remaining = Math.ceil((lockoutUntil - Date.now()) / 1000)
+      if (remaining <= 0) {
+        window.localStorage.removeItem('upangLoginLockoutUntil')
+        setLockoutUntil(0)
+        setTimeLeft(0)
+        setFailedAttempts(0)
+        setError('')
+        return
+      }
+      setTimeLeft(remaining)
+    }
+    updateCountdown()
+    const timer = window.setInterval(updateCountdown, 1000)
+    return () => window.clearInterval(timer)
+  }, [isLocked, lockoutUntil])
   const [oauthError] = useState(() => {
     const code = new URLSearchParams(window.location.search).get('oauth_error')
     const messages = {
@@ -1009,6 +1012,7 @@ function LoginPage({ onLogin, onSignUp, onForgotPassword, successMessage = '' })
   })
   const handleSubmit = async (event) => {
     event.preventDefault()
+    if (isLocked) return
     setError('')
     if (/\s/.test(password)) {
       setError('Password must not contain spaces.')
@@ -1017,9 +1021,41 @@ function LoginPage({ onLogin, onSignUp, onForgotPassword, successMessage = '' })
     setSubmitting(true)
     try {
       const data = await apiRequest('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) })
+      setFailedAttempts(0)
       onLogin(data.user)
     } catch (requestError) {
-      setError(requestError.message)
+      const isRateLimited = requestError.status === 429 || /too many authentication attempts|rate.?limit|lockout/i.test(requestError.message)
+      if (isRateLimited) {
+        const lockoutLevel = lockoutCount + 1
+        const duration = requestError.retryAfterSeconds > 0
+          ? requestError.retryAfterSeconds
+          : lockoutLevel === 1 ? 30 : 90
+        const lockoutUntil = Date.now() + duration * 1000
+        window.localStorage.setItem('upangLoginLockoutUntil', String(lockoutUntil))
+        window.localStorage.setItem('upangLoginLockoutLevel', String(lockoutLevel))
+        setLockoutCount(lockoutLevel)
+        setLockoutUntil(lockoutUntil)
+        setTimeLeft(Math.ceil((lockoutUntil - Date.now()) / 1000))
+        setError('Too many authentication attempts.')
+      } else if (requestError.status === 401) {
+        const nextFailedAttempts = failedAttempts + 1
+        if (nextFailedAttempts >= 5) {
+          const lockoutLevel = lockoutCount + 1
+          const duration = lockoutLevel === 1 ? 30 : 90
+          const lockoutUntil = Date.now() + duration * 1000
+          window.localStorage.setItem('upangLoginLockoutUntil', String(lockoutUntil))
+          window.localStorage.setItem('upangLoginLockoutLevel', String(lockoutLevel))
+          setLockoutCount(lockoutLevel)
+          setLockoutUntil(lockoutUntil)
+          setTimeLeft(Math.ceil((lockoutUntil - Date.now()) / 1000))
+          setError('Too many authentication attempts.')
+        } else {
+          setFailedAttempts(nextFailedAttempts)
+          setError(requestError.message)
+        }
+      } else {
+        setError(requestError.message)
+      }
     } finally {
       setSubmitting(false)
     }
@@ -1031,10 +1067,10 @@ function LoginPage({ onLogin, onSignUp, onForgotPassword, successMessage = '' })
         <p className="login-kicker">WELCOME!</p><h1>To <span>Upang Assist</span></h1><h2>Log In</h2>
         {successMessage && <p className="recovery-feedback recovery-feedback-info" role="status">{successMessage}</p>}
         <form className="login-form" onSubmit={handleSubmit} noValidate>
-          <label htmlFor="login-email">School Email Address:</label><div className="input-with-icon"><input id="login-email" type="email" placeholder="student.example.up@phinmaed.com" value={email} onChange={(event) => setEmail(event.target.value)} required /></div>
-          <label htmlFor="login-password">Password:</label><div className="input-with-icon"><input id="login-password" type={showPassword ? 'text' : 'password'} placeholder="Enter your password" value={password} onChange={(event) => setPassword(event.target.value)} required /><button type="button" className="password-toggle-btn" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? 'Hide' : 'Show'}</button></div><button className="forgot-link forgot-link-below" type="button" onClick={onForgotPassword}>Forgot password?</button>
-          {error && <p className="login-error" role="alert">{error}</p>}
-          <button className="login-submit" type="submit" disabled={submitting}>{submitting ? 'LOGGING IN...' : 'LOG IN'}</button>
+          <label htmlFor="login-email">School Email Address:</label><div className="input-with-icon"><input id="login-email" type="email" placeholder="student.example.up@phinmaed.com" value={email} onChange={(event) => setEmail(event.target.value)} disabled={isLocked} required /></div>
+          <label htmlFor="login-password">Password:</label><div className="input-with-icon"><input id="login-password" type={showPassword ? 'text' : 'password'} placeholder="Enter your password" value={password} onChange={(event) => setPassword(event.target.value)} disabled={isLocked} required /><button type="button" className="password-toggle-btn" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? 'Hide' : 'Show'}</button></div><button className="forgot-link forgot-link-below" type="button" onClick={onForgotPassword}>Forgot password?</button>
+          {isLocked ? <p className="login-error" role="alert">Too many authentication attempts. Try again in {timeLeft}s.</p> : error && <p className="login-error" role="alert">{error}</p>}
+          <button className="login-submit" type="submit" disabled={submitting || isLocked}>{isLocked ? `PLEASE WAIT (${timeLeft})` : submitting ? 'LOGGING IN...' : 'LOG IN'}</button>
           <button className="google-signin-btn" type="button" onClick={() => window.location.assign(`${apiBaseUrl}/auth/google`)}><svg className="google-signin-icon" viewBox="0 0 48 48" aria-hidden="true"><path fill="#4285F4" d="M43.6 24.5c0-1.4-.1-2.8-.4-4.1H24v7.8h11a9.4 9.4 0 0 1-4.1 6.2v5.1h6.7c3.9-3.6 6-8.8 6-15Z"/><path fill="#34A853" d="M24 44c5.5 0 10.1-1.8 13.5-4.9l-6.7-5.1c-1.8 1.2-4 2-6.8 2-5.2 0-9.6-3.5-11.2-8.2H5.9v5.2A20 20 0 0 0 24 44Z"/><path fill="#FBBC05" d="M12.8 27.8a12 12 0 0 1 0-7.6V15H5.9a20 20 0 0 0 0 18l6.9-5.2Z"/><path fill="#EA4335" d="M24 12.1c3 0 5.6 1 7.7 3l5.8-5.8A19.3 19.3 0 0 0 24 4 20 20 0 0 0 5.9 15l6.9 5.2c1.6-4.7 6-8.1 11.2-8.1Z"/></svg><span>Sign in with Google</span></button>
         </form>
         {oauthError && <p className="login-error" role="alert">{oauthError}</p>}
@@ -1167,7 +1203,7 @@ function ForgotPasswordPage({ onBack }) {
           <label htmlFor="recovery-otp">One-Time Password</label><div className="input-with-icon"><input id="recovery-otp" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} placeholder="Enter 6-digit code" value={otp} onChange={(event) => { setOtp(event.target.value.replace(/\D/g, '').slice(0, 6)); setMessage(''); setFeedbackType('') }} required /></div>
           {message && <p className={`recovery-feedback recovery-feedback-${feedbackType}`} role={feedbackType === 'error' ? 'alert' : 'status'}>{message}</p>}
           <div className="recovery-actions"><button type="submit" className="login-submit" disabled={submitting}>{submitting ? 'VERIFYING...' : 'VERIFY OTP'}</button><button type="button" className="recovery-cancel-btn" onClick={handleCancel}>Cancel</button></div>
-          <p className="recovery-resend-row">{resendSeconds > 0 ? `Resend code in ${resendSeconds}s` : <button className="forgot-link" type="button" onClick={handleResendOtp} disabled={submitting}>Resend OTP</button>}</p>
+          <p className="recovery-resend-row"><button className="recovery-resend-btn" type="button" onClick={handleResendOtp} disabled={submitting || resendSeconds > 0}>{resendSeconds > 0 ? `Resend code in ${resendSeconds}s` : submitting ? 'Sending code...' : 'Resend code'}</button></p>
         </form>}
         {step === 'password' && <form className="login-form recovery-form" onSubmit={handleResetPassword}>
           <label htmlFor="recovery-password">New Password</label><div className="input-with-icon"><input id="recovery-password" type="password" minLength={8} maxLength={128} autoComplete="new-password" placeholder="At least 8 characters" value={password} onChange={(event) => { setPassword(event.target.value); setMessage(''); setFeedbackType('') }} required /></div>
@@ -1228,8 +1264,12 @@ function SignupPage({ onBack, onContinue }) {
     if (!/^[^\s@]+@phinmaed\.com$/i.test(registrationDetails.email)) nextFieldErrors.email = 'Enter a valid email ending in @phinmaed.com.'
     if (!registrationDetails.course) nextFieldErrors.course = 'Course is required.'
     else if (registrationDetails.course.length > 150) nextFieldErrors.course = 'Course must not exceed 150 characters.'
-    if (form.password.length < 8) nextFieldErrors.password = 'Password must be at least 8 characters.'
-    else if (/\s/.test(form.password)) nextFieldErrors.password = 'Password must not contain spaces.'
+    if (form.password.length < 8) nextFieldErrors.password = 'Password must be at least 8 characters long.'
+    else {
+      const specialCharCount = (form.password.match(/[^a-zA-Z0-9]/g) || []).length
+      if (!/(?=.*[a-zA-Z])(?=.*\d)/.test(form.password)) nextFieldErrors.password = 'Password must contain a mix of letters and numbers.'
+      else if (specialCharCount > 1) nextFieldErrors.password = 'Password can only contain up to one special character.'
+    }
     if (!form.confirmPassword) nextFieldErrors.confirmPassword = 'Confirm Password is required.'
     else if (form.password !== form.confirmPassword) nextFieldErrors.confirmPassword = 'Passwords do not match.'
     setFieldErrors(nextFieldErrors)
@@ -1335,7 +1375,7 @@ function OtpVerificationPage({ onVerified, onBack }) {
           {error && <p className="login-error" role="alert">{error}</p>}
           <div className="recovery-actions"><button className="login-submit" type="submit" disabled={submitting || otp.length !== 6}>{submitting ? 'VERIFYING...' : 'VERIFY ACCOUNT'}</button><button className="recovery-cancel-btn" type="button" onClick={onBack}>Back to Registration</button></div>
         </form>
-        <p className="recovery-resend-row">{now === 0 ? 'Checking resend availability…' : remaining > 0 ? `Resend code in ${remaining}s` : <button className="forgot-link" type="button" onClick={handleResend} disabled={submitting}>Resend OTP</button>}</p>
+        <p className="recovery-resend-row"><button className="recovery-resend-btn" type="button" onClick={handleResend} disabled={now === 0 || remaining > 0 || submitting}>{now === 0 ? 'Checking resend availability...' : remaining > 0 ? `Resend code in ${remaining}s` : submitting ? 'Sending code...' : 'Resend code'}</button></p>
         {error && !email && <p className="login-footer"><button type="button" onClick={onBack}>Return to registration</button></p>}
       </div></section>
     </main>

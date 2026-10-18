@@ -1,4 +1,4 @@
-/* ==========================================================================
+﻿/* ==========================================================================
    UPang Assist — Clean & Modern Campus AI Interface
    PHINMA University of Pangasinan
    ========================================================================== */
@@ -1191,6 +1191,9 @@
 .recovery-feedback-info { color: #8a5b12; }
 .recovery-feedback-error { color: #b42318; }
 .recovery-resend-row { margin: 0; color: #627267; font-size: .82rem; line-height: 1.5; text-align: center; }
+.recovery-resend-btn { min-height: 36px; padding: 0 16px; border: 1px solid rgba(22, 54, 37, .2); border-radius: 9px; background: #fff; color: #2a5a40; font: 600 .82rem 'Plus Jakarta Sans', sans-serif; cursor: pointer; transition: all .18s; }
+.recovery-resend-btn:hover:not(:disabled) { border-color: #2a5a40; background: #f5f8f4; }
+.recovery-resend-btn:disabled { color: #7d887f; background: #f7f8f6; cursor: not-allowed; }
 .recovery-content .login-footer { margin-top: 16px; }
 
 @media (max-width: 480px) {
